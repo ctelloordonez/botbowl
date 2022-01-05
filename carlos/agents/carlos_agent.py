@@ -20,7 +20,7 @@ from ffai.core.util import get_data_path
 # Architecture
 model_name = 'epoch-29'
 env_name = 'FFAI-v3'
-model_filename = f"ffai/data/models/{model_name}.pth"
+model_filename = f"carlos/data/models/{model_name}.pth"
 log_filename = f"logs/{env_name}/{env_name}.dat"
  
 # Environment
@@ -315,7 +315,7 @@ class CopiedAgent(Agent):
         print(filename)
         state_dict_file = torch.load(filename)
         # print(state_dict_file.keys())
-        self.policy.load_state_dict(state_dict_file)
+        self.policy.load_state_dict(state_dict_file['model_state_dict'])
         # self.policy = torch.load(filename)
         self.policy.eval()
         self.end_setup = False
@@ -516,44 +516,44 @@ if __name__ == "__main__":
     config.competition_mode = False
     config.debug_mode = False
     
-    for e in range(29, 30):
-        model_name = f"epoch-{e}"
-        print(model_name)
-        model_filename = f"ffai/data/models/{model_name}.pth"
-        # Play 100 games
-        game_times = []
-        wins = 0
-        draws = 0
-        n = 100
-        is_home = True
-        tds_away = 0
-        tds_home = 0
-        for i in range(n):
+    # for e in range(29, 30):
+    # model_name = f"epoch-{e}"
+    # print(model_name)
+    # model_filename = f"carlos/data/models/{model_name}.pth"
+    # Play 100 games
+    game_times = []
+    wins = 0
+    draws = 0
+    n = 100
+    is_home = True
+    tds_away = 0
+    tds_home = 0
+    for i in range(n):
+
+        if is_home:
+            away_agent = ffai.make_bot('random')
+            home_agent = ffai.make_bot('my-copied-bot')
+        else:
+            away_agent = ffai.make_bot('my-copied-bot')
+            home_agent = ffai.make_bot("random")
+        game = ffai.Game(i, home, away, home_agent, away_agent, config, arena=arena, ruleset=ruleset)
+        game.config.fast_mode = True
+
+        # print("Starting game", (i+1))
+        game.init()
+        # print("Game is over")
+
+        winner = game.get_winner()
+        if winner is None:
+            draws += 1
+        elif winner == home_agent and is_home:
+            wins += 1
+        elif winner == away_agent and not is_home:
+            wins += 1
+
+        tds_home += game.get_agent_team(home_agent).state.score
+        tds_away += game.get_agent_team(away_agent).state.score
     
-            if is_home:
-                away_agent = ffai.make_bot('random')
-                home_agent = ffai.make_bot('my-copied-bot')
-            else:
-                away_agent = ffai.make_bot('my-copied-bot')
-                home_agent = ffai.make_bot("random")
-            game = ffai.Game(i, home, away, home_agent, away_agent, config, arena=arena, ruleset=ruleset)
-            game.config.fast_mode = True
-    
-            # print("Starting game", (i+1))
-            game.init()
-            # print("Game is over")
-    
-            winner = game.get_winner()
-            if winner is None:
-                draws += 1
-            elif winner == home_agent and is_home:
-                wins += 1
-            elif winner == away_agent and not is_home:
-                wins += 1
-    
-            tds_home += game.get_agent_team(home_agent).state.score
-            tds_away += game.get_agent_team(away_agent).state.score
-    
-        print(f"Home/Draws/Away: {wins}/{draws}/{n-wins-draws}")
-        print(f"Home TDs per game: {tds_home/n}")
-        print(f"Away TDs per game: {tds_away/n}")
+    print(f"Home/Draws/Away: {wins}/{draws}/{n-wins-draws}")
+    print(f"Home TDs per game: {tds_home/n}")
+    print(f"Away TDs per game: {tds_away/n}")
