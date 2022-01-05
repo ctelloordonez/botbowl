@@ -723,7 +723,7 @@ if __name__ == "__main__":
     away = ffai.load_team_by_filename("human", ruleset)
 
     # Play 10 games
-    for i in range(100):
+    for i in range(400):
         home_agent = ffai.make_bot('copied_scripted')
         home_agent.name = "Home scripted"
         away_agent = ffai.make_bot('copied_scripted')

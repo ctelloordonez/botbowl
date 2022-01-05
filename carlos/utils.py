@@ -34,6 +34,8 @@ def create_dataset():
     }
  
     for f, file in enumerate(os.listdir(pairs_directory)):
+        if f > 400000:
+            break
         filename = os.path.join(pairs_directory, file)
  
         pair = torch.load(filename)
@@ -60,7 +62,7 @@ def get_action_type(action_idx, non_spatial_action_types, spatial_action_types, 
 
 
 def actions_stats():
-    directory = get_data_path('tensor_dataset_action_mask')
+    directory = get_data_path('dataset')
     if not os.path.exists(directory):
         os.mkdir(directory)
  
@@ -84,7 +86,7 @@ def actions_stats():
         actions_dic[action_type] = 0
     pairs_count = 0
 
-    directory = get_data_path('tensor_dataset_action_mask')
+    directory = get_data_path('dataset')
     if not os.path.exists(directory):
         return
    
@@ -126,7 +128,7 @@ def actions_stats():
  
  
 def load_example():
-    directory = get_data_path('tensor_dataset_action_mask')
+    directory = get_data_path('pairs')
     if not os.path.exists(directory):
         os.mkdir(directory)
  
@@ -142,16 +144,16 @@ def load_example():
  
 def load_dataset():
     print('Loading dataset')
-    directory = get_data_path('tensor_dataset_action_mask')
+    directory = get_data_path('dataset')
     if not os.path.exists(directory):
         return
    
     filename = os.path.join(directory, f"dataset.pt")
     dataset = torch.load(filename)
-    dataset['X_spatial'] = dataset['X_spatial'][0:400]
-    dataset['X_non_spatial'] = dataset['X_non_spatial'][0:400]
-    dataset['action_masks'] = dataset['action_masks'][0:400]
-    dataset['Y'] = dataset['Y'][0:400]
+    # dataset['X_spatial'] = dataset['X_spatial'][0:400]
+    # dataset['X_non_spatial'] = dataset['X_non_spatial'][0:400]
+    # # dataset['action_masks'] = dataset['action_masks'][0:400]
+    # dataset['Y'] = dataset['Y'][0:400]
     print('Dataset loaded')
     return dataset
    
@@ -164,15 +166,15 @@ def make_trainset(dataset):
     spatial_obs = torch.reshape(spatial_obs, (split, 43, 17, 28))
     non_spatial_obs = torch.stack(dataset['X_non_spatial'][0:split])
     non_spatial_obs = torch.reshape(non_spatial_obs, (split, 1, 116))
-    action_masks = torch.stack(dataset['action_masks'][0:split])
-    action_masks = torch.reshape(action_masks, (split, 8117))
+    # action_masks = torch.stack(dataset['action_masks'][0:split])
+    # action_masks = torch.reshape(action_masks, (split, 8117))
     # print(action_masks.shape)
     actions = torch.stack(dataset['Y'][0:split])
     actions = torch.flatten(actions)
     actions = actions.long()
     # print(actions.size())
  
-    trainset = torch.utils.data.TensorDataset(spatial_obs, non_spatial_obs, action_masks, actions)
+    trainset = torch.utils.data.TensorDataset(spatial_obs, non_spatial_obs, actions)
     print('Trainset made')
     return trainset
  
@@ -182,13 +184,13 @@ def make_testset(dataset):
     spatial_obs = torch.reshape(spatial_obs, (len(spatial_obs), 43, 17, 28))
     non_spatial_obs = torch.stack(dataset['X_non_spatial'][split:-1])
     non_spatial_obs = torch.reshape(non_spatial_obs, (len(non_spatial_obs), 1, 116))
-    action_masks = torch.stack(dataset['action_masks'][split:-1])
-    action_masks = torch.reshape(action_masks, (len(action_masks), 8117))
+    # action_masks = torch.stack(dataset['action_masks'][split:-1])
+    # action_masks = torch.reshape(action_masks, (len(action_masks), 8117))
     actions = torch.stack(dataset['Y'][split:-1])
     actions = torch.flatten(actions)
     actions = actions.long()
  
-    testset = torch.utils.data.TensorDataset(spatial_obs, non_spatial_obs, action_masks, actions)
+    testset = torch.utils.data.TensorDataset(spatial_obs, non_spatial_obs, actions)
     print('Testset made')
     return testset
  
@@ -206,10 +208,9 @@ def train(epoch, trainloader, model, device, optimizer, loss_function):
  
     for i, data in enumerate(trainloader, 0):
         # get the inputs; data is a list of [inputs, labels]
-        spatial_obs, non_spatial_obs, action_masks, actions = data
+        spatial_obs, non_spatial_obs, actions = data
         spatial_obs = spatial_obs.to(device)
         non_spatial_obs = non_spatial_obs.to(device)
-        action_masks = action_masks.to(device)
         actions = actions.to(device)
  
         # zero the parameter gradients
@@ -265,7 +266,7 @@ def test(epoch, testloader, model, device, optimizer, loss_function):
   with torch.no_grad():
     for i, data in enumerate(testloader, 0):
         # get the inputs; data is a list of [inputs, labels]
-        spatial_obs, non_spatial_obs, action_masks, actions = data
+        spatial_obs, non_spatial_obs, actions = data
         spatial_obs = spatial_obs.to(device)
         non_spatial_obs = non_spatial_obs.to(device)
         actions = actions.to(device)
@@ -297,10 +298,8 @@ def test(epoch, testloader, model, device, optimizer, loss_function):
 
  
  
-split = 300
+split = 300000
 batch_size = 4
-# Environment
-env_name = "FFAI-1-v3"
  
 # Architecture
 num_hidden_nodes = 1024
@@ -372,6 +371,11 @@ def main():
         print('---Test takes: %s seconds ---' %(time.time() - start_time))
         eval_losses.append(epoch_loss)
         eval_accu.append(epoch_accu)
+
+    # Clean memory
+    del dataset
+    del trainloader
+    del testloader
  
     plt.plot(train_accu)
     plt.plot(eval_accu)
@@ -379,7 +383,7 @@ def main():
     plt.ylabel('accuracy')
     plt.legend(['Train','Valid'])
     plt.title('Train vs Valid Accuracy')
-    plt.savefig('plots/accuracy.png')
+    plt.savefig('carlos/data/plots/accuracy.png')
     plt.close()
  
     plt.plot(train_losses)
@@ -388,16 +392,16 @@ def main():
     plt.ylabel('losses')
     plt.legend(['Train','Valid'])
     plt.title('Train vs Valid Losses')
-    plt.savefig('plots/losses.png')
+    plt.savefig('carlos/data/plots/losses.png')
     plt.close()
 
     print('Finished Training')
  
  
 if __name__ == "__main__":
-    
-    actions_stats()
-    # main()
+    # create_dataset()
+    # actions_stats()
+    main()
  
         # running_loss = 0.0
         # for i, data in enumerate(trainloader, 0):
