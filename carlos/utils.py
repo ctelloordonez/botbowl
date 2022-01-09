@@ -5,7 +5,6 @@ from ffai.core.model import Action
 import torch
 import numpy as np
 from agents.carlos_agent import CNNPolicy
-# from examples.a2c.a2c_agent import CNNPolicy
 from ffai import FFAIEnv
 import gym
 import torch.optim as optim

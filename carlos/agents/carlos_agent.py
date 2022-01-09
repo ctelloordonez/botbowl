@@ -15,10 +15,11 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import sys
 from ffai.core.util import get_data_path
+from examples.scripted_bot_example import MyScriptedBot
  
  
 # Architecture
-model_name = 'epoch-29'
+model_name = 'epoch-28'
 env_name = 'FFAI-v3'
 model_filename = f"carlos/data/models/{model_name}.pth"
 log_filename = f"logs/{env_name}/{env_name}.dat"
@@ -312,7 +313,7 @@ class CopiedAgent(Agent):
         # MODEL
         self.policy = CNNPolicy(self.spatial_obs_space, self.non_spatial_obs_space, hidden_nodes=num_hidden_nodes, kernels=num_cnn_kernels, actions=self.action_space)
         # print(self.policy.state_dict)
-        print(filename)
+        # print(filename)
         state_dict_file = torch.load(filename)
         # print(state_dict_file.keys())
         self.policy.load_state_dict(state_dict_file['model_state_dict'])
@@ -322,6 +323,7 @@ class CopiedAgent(Agent):
  
     def new_game(self, game, team):
         self.my_team = team
+        self.opp_team = game.get_opp_team(team)
         self.is_home = self.my_team == game.state.home_team
  
     def _flip(self, board):
@@ -339,6 +341,8 @@ class CopiedAgent(Agent):
             if action_choice.action_type == ActionType.MOVE:
                 positions, block_dice, rolls = [], [], []
                 for i in range(len(action_choice.positions)):
+                    # if len(action_choice.paths[i].rolls) <= 0:
+                    #     continue
                     position = action_choice.positions[i]
                     roll = action_choice.paths[i].rolls[0]
                     # Only include positions where there are not players
@@ -359,8 +363,8 @@ class CopiedAgent(Agent):
         self.env.game = game
  
         # Filter out pathfinding-assisted move actions
-        if self.exclude_pathfinding_moves and self.env.game.config.pathfinding_enabled:
-            self._filter_actions()
+        # if self.exclude_pathfinding_moves and self.env.game.config.pathfinding_enabled:
+        #     self._filter_actions()
  
         # Get observation
         observation = self.env._observation(game)
@@ -401,7 +405,20 @@ class CopiedAgent(Agent):
         return action
  
     def end_game(self, game):
-        pass
+        """
+        Called when a game ends.
+        """
+        winner = game.get_winning_team()
+        print("Casualties: ", game.num_casualties())
+        if winner is None:
+            print("It's a draw")
+        elif winner == self.my_team:
+            print("I ({}) won".format(self.name))
+            print(self.my_team.state.score, "-", self.opp_team.state.score)
+        else:
+            print("I ({}) lost".format(self.name))
+            print(self.my_team.state.score, "-", self.opp_team.state.score)
+
  
     def _compute_action_masks(self, observations):
         masks = []
@@ -502,18 +519,18 @@ def load_pair():
 # Register the bot to the framework
 ffai.register_bot('my-copied-bot', CopiedAgent)
 
+
 if __name__ == "__main__":
     # state_dic =torch.load(f"ffai/data/models/{model_name}.pth")
     # print(state_dic.keys())
     # Load configurations, rules, arena and teams
     config = ffai.load_config("bot-bowl-iii")
     config.competition_mode = False
-    config.pathfinding_enabled = False
+    config.pathfinding_enabled = True
     ruleset = ffai.load_rule_set(config.ruleset)
     arena = ffai.load_arena(config.arena)
     home = ffai.load_team_by_filename("human", ruleset)
     away = ffai.load_team_by_filename("human", ruleset)
-    config.competition_mode = False
     config.debug_mode = False
     
     # for e in range(29, 30):
@@ -531,7 +548,7 @@ if __name__ == "__main__":
     for i in range(n):
 
         if is_home:
-            away_agent = ffai.make_bot('random')
+            away_agent = ffai.make_bot('scripted')
             home_agent = ffai.make_bot('my-copied-bot')
         else:
             away_agent = ffai.make_bot('my-copied-bot')
