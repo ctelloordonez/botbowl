@@ -4,17 +4,18 @@ import os
 import gym
 from torch.nn.modules import padding
 from torch.nn.modules.batchnorm import BatchNorm2d
-from ffai import FFAIEnv
+from botbowl import BotBowlEnv
 from torch.autograd import Variable
 import torch.optim as optim
 from multiprocessing import Process, Pipe
-from ffai.ai.layers import *
+import botbowl
+from botbowl.ai.layers import *
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import sys
-from ffai.core.util import get_data_path
+from botbowl.core.util import get_data_path
 from examples.scripted_bot_example import MyScriptedBot
  
  
@@ -302,9 +303,9 @@ class CopiedAgent(Agent):
         self.non_spatial_obs_space = self.env.observation_space.spaces['state'].shape[0] + \
                                 self.env.observation_space.spaces['procedures'].shape[0] + \
                                 self.env.observation_space.spaces['available-action-types'].shape[0]
-        self.non_spatial_action_types = FFAIEnv.simple_action_types + FFAIEnv.defensive_formation_action_types + FFAIEnv.offensive_formation_action_types
+        self.non_spatial_action_types = BotBowlEnv.simple_action_types + BotBowlEnv.defensive_formation_action_types + BotBowlEnv.offensive_formation_action_types
         self.num_non_spatial_action_types = len(self.non_spatial_action_types)
-        self.spatial_action_types = FFAIEnv.positional_action_types
+        self.spatial_action_types = BotBowlEnv.positional_action_types
         self.num_spatial_action_types = len(self.spatial_action_types)
         self.num_spatial_actions = self.num_spatial_action_types * self.spatial_obs_space[1] * self.spatial_obs_space[2]
         self.action_space = self.num_non_spatial_action_types + self.num_spatial_actions
@@ -358,7 +359,7 @@ class CopiedAgent(Agent):
  
         if self.end_setup:
             self.end_setup = False
-            return ffai.Action(ActionType.END_SETUP)
+            return Action(ActionType.END_SETUP)
  
         self.env.game = game
  
@@ -389,13 +390,13 @@ class CopiedAgent(Agent):
         action = actions[0]
         value = values[0]
         action_type, x, y = self._compute_action(action.numpy()[0])
-        position = Square(x, y) if action_type in FFAIEnv.positional_action_types else None
+        position = Square(x, y) if action_type in BotBowlEnv.positional_action_types else None
  
         # Flip position
         # if not self.is_home and position is not None:
         #     position = Square(game.arena.width - 1 - position.x, position.y)
  
-        action = ffai.Action(action_type, position=position, player=None)
+        action = Action(action_type, position=position, player=None)
  
         # Let's just end the setup right after picking a formation
         if action_type.name.lower().startswith('setup'):
@@ -484,23 +485,6 @@ class CopiedAgent(Agent):
         env = gym.make(env_name)
         return env
  
-def main():
-    env = gym.make('FFAI-v3')
-    spatial_obs_space = env.observation_space.spaces['board'].shape
-    board_dim = (spatial_obs_space[1], spatial_obs_space[2])
-    board_squares = spatial_obs_space[1] * spatial_obs_space[2]
- 
-    non_spatial_obs_space = env.observation_space.spaces['state'].shape[0] + env.observation_space.spaces['procedures'].shape[0] + env.observation_space.spaces['available-action-types'].shape[0]
-    non_spatial_action_types = FFAIEnv.simple_action_types + FFAIEnv.defensive_formation_action_types + FFAIEnv.offensive_formation_action_types
-    num_non_spatial_action_types = len(non_spatial_action_types)
-    spatial_action_types = FFAIEnv.positional_action_types
-    num_spatial_action_types = len(spatial_action_types)
-    num_spatial_actions = num_spatial_action_types * spatial_obs_space[1] * spatial_obs_space[2]
-    action_space = num_non_spatial_action_types + num_spatial_actions
- 
-    model = CNNPolicy(spatial_obs_space, non_spatial_obs_space, hidden_nodes=num_hidden_nodes, kernels=num_cnn_kernels, actions=action_space)
- 
- 
  
 def load_pair():
     directory = get_data_path('tensor_dataset')
@@ -517,20 +501,20 @@ def load_pair():
     return pair
  
 # Register the bot to the framework
-ffai.register_bot('my-copied-bot', CopiedAgent)
+botbowl.register_bot('my-copied-bot', CopiedAgent)
 
 
 if __name__ == "__main__":
     # state_dic =torch.load(f"ffai/data/models/{model_name}.pth")
     # print(state_dic.keys())
     # Load configurations, rules, arena and teams
-    config = ffai.load_config("bot-bowl-iii")
+    config = botbowl.load_config("bot-bowl-iii")
     config.competition_mode = False
     config.pathfinding_enabled = True
-    ruleset = ffai.load_rule_set(config.ruleset)
-    arena = ffai.load_arena(config.arena)
-    home = ffai.load_team_by_filename("human", ruleset)
-    away = ffai.load_team_by_filename("human", ruleset)
+    ruleset = botbowl.load_rule_set(config.ruleset)
+    arena = botbowl.load_arena(config.arena)
+    home = botbowl.load_team_by_filename("human", ruleset)
+    away = botbowl.load_team_by_filename("human", ruleset)
     config.debug_mode = False
     
     # for e in range(29, 30):
@@ -548,12 +532,12 @@ if __name__ == "__main__":
     for i in range(n):
 
         if is_home:
-            away_agent = ffai.make_bot('scripted')
-            home_agent = ffai.make_bot('my-copied-bot')
+            away_agent = botbowl.make_bot('scripted')
+            home_agent = botbowl.make_bot('my-copied-bot')
         else:
-            away_agent = ffai.make_bot('my-copied-bot')
-            home_agent = ffai.make_bot("random")
-        game = ffai.Game(i, home, away, home_agent, away_agent, config, arena=arena, ruleset=ruleset)
+            away_agent = ffbotbowlbotbowlai.make_bot('my-copied-bot')
+            home_agent = botbowl.make_bot("random")
+        game = botbowl.Game(i, home, away, home_agent, away_agent, config, arena=arena, ruleset=ruleset)
         game.config.fast_mode = True
 
         # print("Starting game", (i+1))

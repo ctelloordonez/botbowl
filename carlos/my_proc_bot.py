@@ -5,11 +5,13 @@ Year: 2018
 ==========================
 This module contains an example bot that takes random actions.
 """
-from ffai.core.model import Agent
-from ffai.core.procedure import *
+from botbowl import Action
+import botbowl
+from botbowl.core.model import Agent
+from botbowl.core.procedure import *
 import torch
 import gym
-from ffai.ai.env import FFAIEnv
+from botbowl.ai.new_env import NewBotBowlEnv, EnvConf
 import uuid
 from carlos.utils import get_data_path
 
@@ -40,15 +42,15 @@ class MyProcBot(Agent):
     def __init__(self, name):
         super().__init__(name)
 
-        self.env = gym.make('FFAI-v3')
-        
+        self.env = NewBotBowlEnv()
+        self.env_conf = EnvConf()
         spatial_obs_space = self.env.observation_space.spaces['board'].shape
         self.board_dim = (spatial_obs_space[1], spatial_obs_space[2])
         self.board_squares = spatial_obs_space[1] * spatial_obs_space[2]
-        
-        self.non_spatial_action_types = FFAIEnv.simple_action_types + FFAIEnv.defensive_formation_action_types + FFAIEnv.offensive_formation_action_types
+        print(len(self.env_conf.simple_action_types))
+        self.non_spatial_action_types = self.env_conf.simple_action_types
         self.num_non_spatial_action_types = len(self.non_spatial_action_types)
-        self.spatial_action_types = FFAIEnv.positional_action_types
+        self.spatial_action_types = self.env_conf.positional_action_types
         self.num_spatial_action_types = len(self.spatial_action_types)
         self.num_spatial_actions = self.num_spatial_action_types * spatial_obs_space[1] * spatial_obs_space[2]
         self.action_space = self.num_non_spatial_action_types + self.num_spatial_actions
@@ -106,30 +108,6 @@ class MyProcBot(Agent):
 
         return torch.from_numpy(np.stack(spatial_obs)).float(), torch.from_numpy(np.stack(non_spatial_obs)).float()
 
-    # def _compute_action_masks(self, observations):
-    #     masks = []
-    #     m = False
-    #     for ob in observations:
-    #         mask = np.zeros(self.action_space)
-    #         i = 0
-    #         for action_type in self.non_spatial_action_types:
-    #             mask[i] = ob['available-action-types'][action_type.name]
-    #             i += 1
-    #         for action_type in self.spatial_action_types:
-    #             if ob['available-action-types'][action_type.name] == 0:
-    #                 mask[i:i+self.board_squares] = 0
-    #             elif ob['available-action-types'][action_type.name] == 1:
-    #                 position_mask = ob['board'][f"{action_type.name.replace('_', ' ').lower()} positions"]
-    #                 position_mask_flatten = np.reshape(position_mask, (1, self.board_squares))
-    #                 for j in range(self.board_squares):
-    #                     mask[i + j] = position_mask_flatten[0][j]
-    #             i += self.board_squares
-    #         assert 1 in mask
-    #         if m:
-    #             print(mask)
-    #         masks.append(mask)
-    #     return masks
-
     
     def act(self, game):
         action = self.act2(game)
@@ -142,13 +120,13 @@ class MyProcBot(Agent):
             # action_array[action_idx] = 1
 
             action_type, x, y = self.compute_action(action_idx)
-            position = Square(x, y) if action_type in FFAIEnv.positional_action_types else None
-            comp_action = ffai.Action(action_type, position=position, player=None)
+            position = Square(x, y) if action_type in self.env_conf.positional_action_types else None
+            comp_action = Action(action_type, position=position, player=None)
             # print(action.action_type == comp_action.action_type and action.position == comp_action.position)
             # print(action.to_json())
             # print(comp_action.to_json())
-            
-            observation = self.env._observation(game)
+            self.env.game = game
+            observation = self.env.get_state()
             obs = [observation]
             spatial_obs, non_spatial_obs = self._update_obs(obs)
             # action_masks = self._compute_action_masks(obs)

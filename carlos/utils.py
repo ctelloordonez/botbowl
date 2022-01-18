@@ -1,11 +1,11 @@
 import os
 from tarfile import TarInfo
 from tkinter.constants import S
-from ffai.core.model import Action
+from botbowl.core.model import Action
 import torch
 import numpy as np
 from agents.carlos_agent import CNNPolicy
-from ffai import FFAIEnv
+from botbowl.ai.new_env import NewBotBowlEnv
 import gym
 import torch.optim as optim
 import torch.nn as nn
@@ -71,9 +71,9 @@ def actions_stats():
     board_squares = spatial_obs_space[1] * spatial_obs_space[2]
  
     non_spatial_obs_space = env.observation_space.spaces['state'].shape[0] + env.observation_space.spaces['procedures'].shape[0] + env.observation_space.spaces['available-action-types'].shape[0]
-    non_spatial_action_types = FFAIEnv.simple_action_types + FFAIEnv.defensive_formation_action_types + FFAIEnv.offensive_formation_action_types
+    non_spatial_action_types = NewBotBowlEnv.simple_action_types + NewBotBowlEnv.defensive_formation_action_types + NewBotBowlEnv.offensive_formation_action_types
     num_non_spatial_action_types = len(non_spatial_action_types)
-    spatial_action_types = FFAIEnv.positional_action_types
+    spatial_action_types = NewBotBowlEnv.positional_action_types
     num_spatial_action_types = len(spatial_action_types)
     num_spatial_actions = num_spatial_action_types * spatial_obs_space[1] * spatial_obs_space[2]
     action_space = num_non_spatial_action_types + num_spatial_actions
@@ -326,9 +326,9 @@ def main():
     board_squares = spatial_obs_space[1] * spatial_obs_space[2]
  
     non_spatial_obs_space = env.observation_space.spaces['state'].shape[0] + env.observation_space.spaces['procedures'].shape[0] + env.observation_space.spaces['available-action-types'].shape[0]
-    non_spatial_action_types = FFAIEnv.simple_action_types + FFAIEnv.defensive_formation_action_types + FFAIEnv.offensive_formation_action_types
+    non_spatial_action_types = NewBotBowlEnv.simple_action_types + NewBotBowlEnv.defensive_formation_action_types + NewBotBowlEnv.offensive_formation_action_types
     num_non_spatial_action_types = len(non_spatial_action_types)
-    spatial_action_types = FFAIEnv.positional_action_types
+    spatial_action_types = NewBotBowlEnv.positional_action_types
     num_spatial_action_types = len(spatial_action_types)
     num_spatial_actions = num_spatial_action_types * spatial_obs_space[1] * spatial_obs_space[2]
     action_space = num_non_spatial_action_types + num_spatial_actions
