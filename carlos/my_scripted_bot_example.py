@@ -694,6 +694,7 @@ class MyCopiedScriptedBot(MyProcBot):
         print("Casualties: ", game.num_casualties())
         if winner is None:
             print("It's a draw")
+            print(self.my_team.state.score, "-", self.opp_team.state.score)
         elif winner == self.my_team:
             print("I ({}) won".format(self.name))
             print(self.my_team.state.score, "-", self.opp_team.state.score)

@@ -43,101 +43,133 @@ class MyProcBot(Agent):
         super().__init__(name)
 
         self.env = NewBotBowlEnv()
-        self.env_conf = EnvConf()
-        spatial_obs_space = self.env.observation_space.spaces['board'].shape
-        self.board_dim = (spatial_obs_space[1], spatial_obs_space[2])
-        self.board_squares = spatial_obs_space[1] * spatial_obs_space[2]
-        print(len(self.env_conf.simple_action_types))
-        self.non_spatial_action_types = self.env_conf.simple_action_types
-        self.num_non_spatial_action_types = len(self.non_spatial_action_types)
-        self.spatial_action_types = self.env_conf.positional_action_types
-        self.num_spatial_action_types = len(self.spatial_action_types)
-        self.num_spatial_actions = self.num_spatial_action_types * spatial_obs_space[1] * spatial_obs_space[2]
-        self.action_space = self.num_non_spatial_action_types + self.num_spatial_actions
+        self.env_conf = self.env.env_conf
+        self.rnd = np.random.RandomState(None)
+        # spatial_obs_space = self.env.observation_space.spaces['board'].shape
+        # self.board_dim = (spatial_obs_space[1], spatial_obs_space[2])
+        # self.board_squares = spatial_obs_space[1] * spatial_obs_space[2]
+        
+        # self.non_spatial_action_types = NewBotBowlEnv.simple_action_types + NewBotBowlEnv.defensive_formation_action_types + NewBotBowlEnv.offensive_formation_action_types
+        # self.num_non_spatial_action_types = len(self.non_spatial_action_types)
+        # self.spatial_action_types = NewBotBowlEnv.positional_action_types
+        # self.num_spatial_action_types = len(self.spatial_action_types)
+        # self.num_spatial_actions = self.num_spatial_action_types * spatial_obs_space[1] * spatial_obs_space[2]
+        # self.action_space = self.num_non_spatial_action_types + self.num_spatial_actions
 
 
-    def compute_action(self, action_idx):
-        if action_idx < len(self.non_spatial_action_types):
-            return self.non_spatial_action_types[action_idx], 0, 0
-        spatial_idx = action_idx - self.num_non_spatial_action_types
-        spatial_pos_idx = spatial_idx % self.board_squares
-        spatial_y = int(spatial_pos_idx / self.board_dim[1])
-        spatial_x = int(spatial_pos_idx % self.board_dim[1])
-        spatial_action_type_idx = int(spatial_idx / self.board_squares)
-        spatial_action_type = self.spatial_action_types[spatial_action_type_idx]
-        return spatial_action_type, spatial_x, spatial_y
+    # def compute_action(self, action_idx):
+    #     if action_idx < len(self.non_spatial_action_types):
+    #         return self.non_spatial_action_types[action_idx], 0, 0
+    #     spatial_idx = action_idx - self.num_non_spatial_action_types
+    #     spatial_pos_idx = spatial_idx % self.board_squares
+    #     spatial_y = int(spatial_pos_idx / self.board_dim[1])
+    #     spatial_x = int(spatial_pos_idx % self.board_dim[1])
+    #     spatial_action_type_idx = int(spatial_idx / self.board_squares)
+    #     spatial_action_type = self.spatial_action_types[spatial_action_type_idx]
+    #     return spatial_action_type, spatial_x, spatial_y
 
-    def get_action_idx(self, action):
-        if action.action_type in self.non_spatial_action_types:
-            return self.non_spatial_action_types.index(action.action_type)
+    # def get_action_idx(self, action):
+    #     if action.action_type in self.non_spatial_action_types:
+    #         return self.non_spatial_action_types.index(action.action_type)
 
-        if action.action_type in self.spatial_action_types:
-            spatial_action_type_idx = self.spatial_action_types.index(action.action_type)
-            spatial_idx = spatial_action_type_idx * self.board_squares
-            if action.position is None and action.player is not None:
-                action.position = action.player.position
-            if action.position is None:
-                return -1
-            spatial_pos_idx = action.position.y * self.board_dim[1] + action.position.x
-            return self.num_non_spatial_action_types + spatial_idx + spatial_pos_idx
+    #     if action.action_type in self.spatial_action_types:
+    #         spatial_action_type_idx = self.spatial_action_types.index(action.action_type)
+    #         spatial_idx = spatial_action_type_idx * self.board_squares
+    #         if action.position is None and action.player is not None:
+    #             action.position = action.player.position
+    #         if action.position is None:
+    #             return -1
+    #         spatial_pos_idx = action.position.y * self.board_dim[1] + action.position.x
+    #         return self.num_non_spatial_action_types + spatial_idx + spatial_pos_idx
 
-        return -1
+    #     return -1
 
-    def _update_obs(self, observations):
-        """
-        Takes the observation returned by the environment and transforms it to an numpy array that contains all of
-        the feature layers and non-spatial info.
-        """
-        spatial_obs = []
-        non_spatial_obs = []
+    # def _update_obs(self, observations):
+    #     """
+    #     Takes the observation returned by the environment and transforms it to an numpy array that contains all of
+    #     the feature layers and non-spatial info.
+    #     """
+    #     spatial_obs = []
+    #     non_spatial_obs = []
 
-        for obs in observations:
-            spatial_ob = np.stack(obs['board'].values())
+    #     for obs in observations:
+    #         spatial_ob = np.stack(obs['board'].values())
 
-            state = list(obs['state'].values())
-            procedures = list(obs['procedures'].values())
-            actions = list(obs['available-action-types'].values())
+    #         state = list(obs['state'].values())
+    #         procedures = list(obs['procedures'].values())
+    #         actions = list(obs['available-action-types'].values())
 
-            non_spatial_ob = np.stack(state+procedures+actions)
+    #         non_spatial_ob = np.stack(state+procedures+actions)
 
-            # feature_layers = np.expand_dims(feature_layers, axis=0)
-            non_spatial_ob = np.expand_dims(non_spatial_ob, axis=0)
+    #         # feature_layers = np.expand_dims(feature_layers, axis=0)
+    #         non_spatial_ob = np.expand_dims(non_spatial_ob, axis=0)
 
-            spatial_obs.append(spatial_ob)
-            non_spatial_obs.append(non_spatial_ob)
+    #         spatial_obs.append(spatial_ob)
+    #         non_spatial_obs.append(non_spatial_ob)
 
-        return torch.from_numpy(np.stack(spatial_obs)).float(), torch.from_numpy(np.stack(non_spatial_obs)).float()
+    #     return torch.from_numpy(np.stack(spatial_obs)).float(), torch.from_numpy(np.stack(non_spatial_obs)).float()
 
     
     def act(self, game):
         action = self.act2(game)
         action_idx = -1
+        self.env.game = game
         if action is not None and game._is_action_allowed(action):
-            action_idx = self.get_action_idx(action)
+            # action_idx = self.get_action_idx(action)
+            try:
+                action_idx = self.env._compute_action_idx(action)
+            except AttributeError:
+                action_idx = -1
         if action_idx != -1:
             action_array = np.array([action_idx])
             # action_array = np.zeros(self.action_space)
             # action_array[action_idx] = 1
 
-            action_type, x, y = self.compute_action(action_idx)
-            position = Square(x, y) if action_type in self.env_conf.positional_action_types else None
-            comp_action = Action(action_type, position=position, player=None)
+            # action_type, x, y = self.compute_action(action_idx)
+            # position = Square(x, y) if action_type in NewBotBowlEnv.positional_action_types else None
+            # comp_action = botbowl.Action(action_type, position=position, player=None)
             # print(action.action_type == comp_action.action_type and action.position == comp_action.position)
             # print(action.to_json())
             # print(comp_action.to_json())
-            self.env.game = game
-            observation = self.env.get_state()
-            obs = [observation]
-            spatial_obs, non_spatial_obs = self._update_obs(obs)
-            # action_masks = self._compute_action_masks(obs)
-            # action_masks = torch.tensor(action_masks, dtype=torch.bool)
+
+            # self.env.game = game
+            # observation = self.env.get_state()
+            # obs = [observation]
+            # spatial_obs, non_spatial_obs, action_mask = tuple(map(torch.from_numpy, self.env.get_state()))
+            
+            spatial_obs, non_spatial_obs, action_mask = self.env.get_state()
+            spatial_obs = torch.from_numpy(np.stack(spatial_obs)).float()
+            non_spatial_obs = torch.from_numpy(np.stack(non_spatial_obs)).float()
             obs = {
                 'spatial_obs': spatial_obs,
                 'non_spatial_obs': non_spatial_obs
             }
             pair = Pair(obs=obs, action=torch.from_numpy(np.stack(action_array)).float())
+            # print("done")
             pair.dump()
 
+        if action is None and len(game.state.available_actions) > 0:
+            action = self.random_action(game)
+
+        if not game._is_action_allowed(action):
+            action = self.random_action(game)
+
+        return action
+
+    def random_action(self, game):
+        # Select a random action type
+        while True:
+            action_choice = self.rnd.choice(game.state.available_actions)
+            # Ignore PLACE_PLAYER actions
+            if action_choice.action_type != botbowl.ActionType.PLACE_PLAYER:
+                break
+
+        # Select a random position and/or player
+        position = self.rnd.choice(action_choice.positions) if len(action_choice.positions) > 0 else None
+        player = self.rnd.choice(action_choice.players) if len(action_choice.players) > 0 else None
+
+        # Make action object
+        action = botbowl.Action(action_choice.action_type, position=position, player=player)
         return action
 
     def act2(self, game):
@@ -203,6 +235,10 @@ class MyProcBot(Agent):
             return self.apothecary(game)
         if isinstance(proc, Interception):
             return self.interception(game)
+        if isinstance(proc, BloodLustBlockOrMove):
+            return self.blood_lust_block_or_move(game)
+        if isinstance(proc, EatThrall):
+            return self.eat_thrall(game)
 
         raise Exception("Unknown procedure")
 
@@ -266,30 +302,6 @@ class MyProcBot(Agent):
     def apothecary(self, game):
         raise NotImplementedError("This method must be overridden by non-human subclasses")
 
-    def move_action(self, game):
-        raise NotImplementedError("This method must be overridden by non-human subclasses")
-
-    def block_action(self, game):
-        raise NotImplementedError("This method must be overridden by non-human subclasses")
-
-    def blitz_action(self, game):
-        raise NotImplementedError("This method must be overridden by non-human subclasses")
-
-    def handoff_action(self, game):
-        raise NotImplementedError("This method must be overridden by non-human subclasses")
-
-    def pass_action(self, game):
-        raise NotImplementedError("This method must be overridden by non-human subclasses")
-
-    def foul_action(self, game):
-        raise NotImplementedError("This method must be overridden by non-human subclasses")
-
-    def throw_bomb_action(self, game):
-        raise NotImplementedError("This method must be overridden by non-human subclasses")
-
-    def catch(self, game):
-        raise NotImplementedError("This method must be overridden by non-human subclasses")
-
     def interception(self, game):
         raise NotImplementedError("This method must be overridden by non-human subclasses")
 
@@ -302,4 +314,8 @@ class MyProcBot(Agent):
     def pickup(self, game):
         raise NotImplementedError("This method must be overridden by non-human subclasses")
 
+    def blood_lust_block_or_move(self, game):
+        raise NotImplementedError("This method must be overridden by non-human subclasses")
 
+    def eat_thrall(self, game):
+        raise NotImplementedError("This method must be overridden by non-human subclasses")
