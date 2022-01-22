@@ -1,10 +1,11 @@
+from fileinput import filename
 import os
 from tarfile import TarInfo
 from tkinter.constants import S
 from botbowl.core.model import Action
 import torch
 import numpy as np
-from agents.carlos_agent import CNNPolicy
+# from agents.carlos_agent import CNNPolicy
 from botbowl.ai.new_env import NewBotBowlEnv
 import gym
 import torch.optim as optim
@@ -162,7 +163,7 @@ def make_trainset(dataset):
     # print(len(dataset['X_spatial']))
     spatial_obs = torch.stack(dataset['X_spatial'][0:split])
     # print(spatial_obs.size())
-    spatial_obs = torch.reshape(spatial_obs, (split, 43, 17, 28))
+    spatial_obs = torch.reshape(spatial_obs, (split, 44, 17, 28)) # TODO: fix magic number
     non_spatial_obs = torch.stack(dataset['X_non_spatial'][0:split])
     non_spatial_obs = torch.reshape(non_spatial_obs, (split, 1, 116))
     # action_masks = torch.stack(dataset['action_masks'][0:split])
@@ -180,7 +181,7 @@ def make_trainset(dataset):
 def make_testset(dataset):
     print('Makig testset')
     spatial_obs = torch.stack(dataset['X_spatial'][split:-1])
-    spatial_obs = torch.reshape(spatial_obs, (len(spatial_obs), 43, 17, 28))
+    spatial_obs = torch.reshape(spatial_obs, (len(spatial_obs), 44, 17, 28)) # TODO: Fix magic number
     non_spatial_obs = torch.stack(dataset['X_non_spatial'][split:-1])
     non_spatial_obs = torch.reshape(non_spatial_obs, (len(non_spatial_obs), 1, 116))
     # action_masks = torch.stack(dataset['action_masks'][split:-1])
@@ -304,6 +305,10 @@ batch_size = 4
 num_hidden_nodes = 1024
 num_cnn_kernels = [128, 64, 17]
 
+def make_env():
+    env = NewBotBowlEnv()
+    return env
+
 def main():
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     print('Device ', device)
@@ -320,20 +325,28 @@ def main():
                                                 shuffle=False, num_workers=2)
    
  
-    env = gym.make('FFAI-v3')
-    spatial_obs_space = env.observation_space.spaces['board'].shape
-    board_dim = (spatial_obs_space[1], spatial_obs_space[2])
-    board_squares = spatial_obs_space[1] * spatial_obs_space[2]
+    env = make_env()
+    env.reset()
+    spat_obs, non_spat_obs, action_mask = env.get_state()
+    spatial_obs_space = spat_obs.shape
+    non_spatial_obs_space = non_spat_obs.shape[0]
+    action_space = len(action_mask)
+
+    # spatial_obs_space = env.observation_space.spaces['board'].shape
+    # board_dim = (spatial_obs_space[1], spatial_obs_space[2])
+    # board_squares = spatial_obs_space[1] * spatial_obs_space[2]
  
-    non_spatial_obs_space = env.observation_space.spaces['state'].shape[0] + env.observation_space.spaces['procedures'].shape[0] + env.observation_space.spaces['available-action-types'].shape[0]
-    non_spatial_action_types = NewBotBowlEnv.simple_action_types + NewBotBowlEnv.defensive_formation_action_types + NewBotBowlEnv.offensive_formation_action_types
-    num_non_spatial_action_types = len(non_spatial_action_types)
-    spatial_action_types = NewBotBowlEnv.positional_action_types
-    num_spatial_action_types = len(spatial_action_types)
-    num_spatial_actions = num_spatial_action_types * spatial_obs_space[1] * spatial_obs_space[2]
-    action_space = num_non_spatial_action_types + num_spatial_actions
- 
+    # non_spatial_obs_space = env.observation_space.spaces['state'].shape[0] + env.observation_space.spaces['procedures'].shape[0] + env.observation_space.spaces['available-action-types'].shape[0]
+    # non_spatial_action_types = NewBotBowlEnv.simple_action_types + NewBotBowlEnv.defensive_formation_action_types + NewBotBowlEnv.offensive_formation_action_types
+    # num_non_spatial_action_types = len(non_spatial_action_types)
+    # spatial_action_types = NewBotBowlEnv.positional_action_types
+    # num_spatial_action_types = len(spatial_action_types)
+    # num_spatial_actions = num_spatial_action_types * spatial_obs_space[1] * spatial_obs_space[2]
+    # action_space = num_non_spatial_action_types + num_spatial_actions
+    filename = "epoch-19.pth"
+    state_dict_file = torch.load(filename)
     model = CNNPolicy(spatial_obs_space, non_spatial_obs_space, hidden_nodes=num_hidden_nodes, kernels=num_cnn_kernels, actions=action_space)
+    model.load_state_dict(state_dict_file['model_state_dict'])
    
     # pair = load_example()
     # spatial_obs = pair['obs']['spatial_obs']
@@ -352,14 +365,16 @@ def main():
  
     loss_function = nn.NLLLoss()
     optimizer = optim.RAdam(model.parameters(), lr=0.0001, weight_decay=0.00001)
+    optimizer.load_state_dict(state_dict_file['optimizer_state_dict'])
  
     train_losses=[]
     train_accu=[]
  
     eval_losses=[]
     eval_accu=[]
+
    
-    for epoch in range(30):
+    for epoch in range(20, 30):
         start_time = time.time()
         epoch_loss, epoch_accu = train(epoch, trainloader, model, device, optimizer, loss_function)
         print('---Train takes: %s seconds ---' %(time.time() - start_time))
@@ -398,7 +413,7 @@ def main():
  
  
 if __name__ == "__main__":
-    # create_dataset()
+    create_dataset()
     # actions_stats()
     main()
  
