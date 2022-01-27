@@ -10,9 +10,9 @@ import torch.optim as optim
 from torch.autograd import Variable
 
 import botbowl
-from botbowl.ai.new_env import NewBotBowlEnv, RewardWrapper, EnvConf, ScriptedActionWrapper, BotBowlWrapper
-from a2c_agent import A2CAgent, CNNPolicy
-from a2c_env import A2C_Reward, a2c_scripted_actions
+from botbowl.ai.env import BotBowlEnv, RewardWrapper, EnvConf, ScriptedActionWrapper, BotBowlWrapper, PPCGWrapper
+from examples.a2c.a2c_agent import A2CAgent, CNNPolicy
+from examples.a2c.a2c_env import A2C_Reward, a2c_scripted_actions
 from botbowl.ai.layers import *
 
 # Environment
@@ -22,20 +22,20 @@ env_name = f"botbowl-{env_size}"
 env_conf = EnvConf(size=env_size)
 
 
-make_agent_from_model = partial(A2CAgent,
-                                env_conf=env_conf,
-                                scripted_func=a2c_scripted_actions)
+make_agent_from_model = partial(A2CAgent, env_conf=env_conf, scripted_func=a2c_scripted_actions)
 
 
 def make_env():
-    env = NewBotBowlEnv(env_conf)
-    # env = ScriptedActionWrapper(env, scripted_func=a2c_scripted_actions)
+    env = BotBowlEnv(env_conf)
+    if ppcg:
+        env = PPCGWrapper(env)
+    env = ScriptedActionWrapper(env, scripted_func=a2c_scripted_actions)
     env = RewardWrapper(env, home_reward_func=A2C_Reward())
     return env
 
 
 # Training configuration
-num_steps = 1000000
+num_steps = 100000
 num_processes = 8
 steps_per_update = 20
 learning_rate = 0.001
@@ -123,32 +123,23 @@ def worker(remote, parent_remote, env: BotBowlWrapper, worker_id):
     steps = 0
     tds = 0
     tds_opp = 0
-    #next_opp = botbowl.make_bot('random')
+    next_opp = botbowl.make_bot('random')
+
+    ppcg_wrapper: Optional[PPCGWrapper] = env.get_wrapper_with_type(PPCGWrapper)
 
     while True:
         command, data = remote.recv()
         if command == 'step':
             steps += 1
             action, dif = data[0], data[1]
+            if ppcg_wrapper is not None:
+                ppcg_wrapper.difficulty = dif
+
             spatial_obs, reward, done, info = env.step(action)
             non_spatial_obs = info['non_spatial_obs']
             action_mask = info['action_mask']
 
-            game: Game = env.game
-
-            # PPCG
-            if dif < 1.0:
-                ball_carrier = game.get_ball_carrier()
-                if ball_carrier and ball_carrier.team == env.game.state.home_team:
-                    extra_endzone_squares = int((1.0 - dif) * 25.0)
-                    distance_to_endzone = ball_carrier.position.x - 1
-                    if distance_to_endzone <= extra_endzone_squares:
-                        game.state.stack.push(Touchdown(env.game, ball_carrier))
-                        game.set_available_actions()
-                        spatial_obs, reward, done, info = env.step(None)
-                        non_spatial_obs = info['non_spatial_obs']
-                        action_mask = info['action_mask']
-
+            game = env.game
             tds_scored = game.state.home_team.state.score - tds
             tds_opp_scored = game.state.away_team.state.score - tds_opp
             tds = game.state.home_team.state.score
@@ -159,7 +150,7 @@ def worker(remote, parent_remote, env: BotBowlWrapper, worker_id):
                 if steps >= reset_steps:
                     print("Max. number of steps exceeded! Consider increasing the number.")
                 done = True
-                #env.root_env.away_agent = next_opp
+                env.root_env.away_agent = next_opp
                 env.reset()
                 spatial_obs, non_spatial_obs, action_mask = env.get_state()
                 steps = 0
@@ -171,7 +162,7 @@ def worker(remote, parent_remote, env: BotBowlWrapper, worker_id):
             steps = 0
             tds = 0
             tds_opp = 0
-            #env.root_env.away_agent = next_opp
+            env.root_env.away_agent = next_opp
             env.reset()
             spatial_obs, non_spatial_obs, action_mask = env.get_state()
             remote.send((spatial_obs, non_spatial_obs, action_mask, 0.0, 0, 0, False))
@@ -235,9 +226,12 @@ class VecEnv:
 
 
 def main():
+    envs = VecEnv([make_env() for _ in range(num_processes)])
+
     env = make_env()
     env.reset()
     spat_obs, non_spat_obs, action_mask = env.get_state()
+    del env
     spatial_obs_space = spat_obs.shape
     non_spatial_obs_space = non_spat_obs.shape[0]
     action_space = len(action_mask)
@@ -258,17 +252,6 @@ def main():
     # PPCG
     difficulty = 0.0 if ppcg else 1.0
     dif_delta = 0.01
-
-    # Reset environments
-    envs = VecEnv([make_env() for _ in range(num_processes)])
-
-    spatial_obs, non_spatial_obs, action_masks, _, _, _, _ = map(torch.from_numpy, envs.reset(difficulty))
-    non_spatial_obs = torch.unsqueeze(non_spatial_obs, dim=1)
-
-    # Add obs to memory
-    memory.spatial_obs[0].copy_(spatial_obs)
-    memory.non_spatial_obs[0].copy_(non_spatial_obs)
-    memory.action_masks[0].copy_(action_masks)
 
     # Variables for storing stats
     all_updates = 0
@@ -302,14 +285,23 @@ def main():
         model_name = f"{exp_id}_selfplay_0.nn"
         model_path = os.path.join(model_dir, model_name)
         torch.save(ac_agent, model_path)
-        envs.swap(make_agent_from_model(name=model_name, filename=model_path))
+        self_play_agent = make_agent_from_model(name=model_name, filename=model_path)
+        envs.swap(self_play_agent)
         selfplay_models += 1
 
-    while all_steps < num_steps:
+    # Reset environments
+    spatial_obs, non_spatial_obs, action_masks, _, _, _, _ = map(torch.from_numpy, envs.reset(difficulty))
 
+    # Add obs to memory
+    non_spatial_obs = torch.unsqueeze(non_spatial_obs, dim=1)
+    memory.spatial_obs[0].copy_(spatial_obs)
+    memory.non_spatial_obs[0].copy_(non_spatial_obs)
+    memory.action_masks[0].copy_(action_masks)
+
+    while all_steps < num_steps:
         for step in range(steps_per_update):
 
-            values, actions = ac_agent.act(
+            _, actions = ac_agent.act(
                 Variable(memory.spatial_obs[step]),
                 Variable(memory.non_spatial_obs[step]),
                 Variable(memory.action_masks[step]))
@@ -351,6 +343,9 @@ def main():
 
             memory.insert(step, spatial_obs, non_spatial_obs, actions.data, shaped_reward, masks, action_masks)
 
+        # -- TRAINING -- #
+
+        # bootstrap next value
         next_value = ac_agent(Variable(memory.spatial_obs[-1], requires_grad=False), Variable(memory.non_spatial_obs[-1], requires_grad=False))[0].data
 
         # Compute returns
@@ -409,7 +404,6 @@ def main():
             selfplay_models += 1
 
         # Self-play swap
-
         if selfplay and all_steps >= selfplay_next_swap:
             selfplay_next_swap = max(all_steps + 1, selfplay_next_swap+selfplay_swap_steps)
             lower = max(0, selfplay_models-1-(selfplay_window-1))
@@ -439,9 +433,9 @@ def main():
             log_mean_reward.append(mean_reward)
             log_difficulty.append(difficulty)
 
-            log = "Upd: {}, Ep: {}, Win: {:.2f}, TD: {:.2f}, TD opp: {:.2f}, Mean reward: {:.3f}, Difficulty: {:.2f}" \
-                .format(all_updates, all_episodes, win_rate, td_rate, td_rate_opp, mean_reward, difficulty)
-            """
+            log = "Updates: {}, Episodes: {}, Timesteps: {}, Win rate: {:.2f}, TD rate: {:.2f}, TD rate opp: {:.2f}, Mean reward: {:.3f}, Difficulty: {:.2f}" \
+                .format(all_updates, all_episodes, all_steps, win_rate, td_rate, td_rate_opp, mean_reward, difficulty)
+
             log_to_file = "{}, {}, {}, {}, {}, {}, {}\n" \
                 .format(all_updates, all_episodes, all_steps, win_rate, td_rate, td_rate_opp, mean_reward, difficulty)
 
@@ -450,7 +444,7 @@ def main():
             print(f"Save log to {log_path}")
             with open(log_path, "a") as myfile:
                 myfile.write(log_to_file)
-            """
+
             print(log)
 
             episodes = 0
