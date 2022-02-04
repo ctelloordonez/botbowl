@@ -40,14 +40,15 @@ class EnvConf:
     layers: List[FeatureLayer]
     procedures: List[Procedure]
     formations: List[Formation]
+    pathfinding: bool
 
-    def __init__(self, size=11, extra_formation_paths: Optional[Iterable[str]] = None):
+    def __init__(self, size=11,
+                 extra_formations: Optional[Iterable[Formation]] = None,
+                 extra_feature_layers: Optional[Iterable[FeatureLayer]] = None,
+                 pathfinding = False):
 
         self.config: Configuration = load_config(f"gym-{size}")
-        formations_paths = formation_defaults[size]
-
-        if extra_formation_paths is not None:
-            formations_paths.extend(extra_formation_paths)
+        self.config.pathfinding_enabled = pathfinding
 
         self.simple_action_types = [
             ActionType.START_GAME,
@@ -55,7 +56,6 @@ class EnvConf:
             ActionType.TAILS,
             ActionType.KICK,
             ActionType.RECEIVE,
-            ActionType.END_SETUP,
             ActionType.END_PLAYER_TURN,
             ActionType.USE_REROLL,
             ActionType.DONT_USE_REROLL,
@@ -72,7 +72,10 @@ class EnvConf:
             ActionType.USE_BRIBE,
             ActionType.DONT_USE_BRIBE,
         ]
-        self.formations = [load_formation(formation, size=size) for formation in formations_paths]
+        self.formations = [load_formation(formation, size=size) for formation in formation_defaults[size]]
+        if extra_formations is not None:
+            assert all(map(lambda x: type(x) is Formation, extra_formations)), ''
+            self.formations.extend(extra_formations)
         self.simple_action_types.extend(self.formations)
 
         self.positional_action_types = [
@@ -97,7 +100,8 @@ class EnvConf:
 
         self.action_types = self.simple_action_types + self.positional_action_types
 
-        self.layers = [
+        self.layers = [AvailablePositionLayer(action_type) for action_type in self.positional_action_types]
+        self.layers.extend([
             OccupiedLayer(),
             OwnPlayerLayer(),
             OppPlayerLayer(),
@@ -125,8 +129,9 @@ class EnvConf:
             SkillLayer(Skill.SURE_HANDS),
             SkillLayer(Skill.CATCH),
             SkillLayer(Skill.PASS)
-        ]
-        self.layers.extend(AvailablePositionLayer(action_type) for action_type in self.positional_action_types)
+        ])
+        if extra_feature_layers is not None:
+            self.layers.extend(extra_feature_layers)
 
         # Procedures that require actions
         self.procedures = [
@@ -323,9 +328,8 @@ class BotBowlEnv(gym.Env):
 
         # Action mask
         num_simple_actions = len(self.env_conf.simple_action_types)
-        aa_layer_first_index = len(self.env_conf.layers) - len(self.env_conf.positional_action_types)
         action_mask = np.concatenate((aa_types[:num_simple_actions],
-                                      spatial_obs[aa_layer_first_index:].flatten()))
+                                      spatial_obs[:len(self.env_conf.positional_action_types)].flatten()))
         action_mask = action_mask > 0.0
         assert True in action_mask
 
@@ -502,8 +506,6 @@ class RewardWrapper(BotBowlWrapper):
 
 
 class ScriptedActionWrapper(BotBowlWrapper):
-    scripted_func: Callable[[Game], Optional[Action]]
-
     def __init__(self, env, scripted_func: Callable[[Game], Optional[Action]]):
         super().__init__(env)
         self.scripted_func = scripted_func
@@ -547,6 +549,6 @@ class PPCGWrapper(BotBowlWrapper):
                 if distance_to_endzone <= extra_endzone_squares:
                     game.state.stack.push(Touchdown(game, ball_carrier))
                     game.set_available_actions()
-                    self.env.step(None, skip_observation=True)
+                    self.env.step(None, skip_observation=True)  # process the Touchdown-procedure
 
         return self.root_env.get_step_return(skip_observation=skip_observation)
