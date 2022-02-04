@@ -1,4 +1,7 @@
-carlos/data/
+carlos/data/behavioural_clonning/training/
+carlos/data/pairs/
+carlos/data/old_pairs/
+carlos/data/dataset/
 # Mac
 .DS_Store
 

@@ -1,0 +1,91 @@
+epoch 15
+Home/Draws/Away: 65/34/1
+Home TDs per game: 0.92
+Away TDs per game: 0.01
+
+epoch 16
+Home/Draws/Away: 64/36/0
+Home TDs per game: 0.9
+Away TDs per game: 0.0
+
+epoch 17
+Home/Draws/Away: 61/39/0
+Home TDs per game: 0.87
+Away TDs per game: 0.0
+
+epoch 18
+Home/Draws/Away: 65/35/0
+Home TDs per game: 0.82
+Away TDs per game: 0.0
+
+epoch 19
+Home/Draws/Away: 70/30/0
+Home TDs per game: 0.97
+Away TDs per game: 0.0
+
+epoch 20
+Home/Draws/Away: 73/27/0
+Home TDs per game: 0.97
+Away TDs per game: 0.0
+
+epoch 21
+Home/Draws/Away: 76/24/0
+Home TDs per game: 1.15
+Away TDs per game: 0.0
+
+epoch 22
+Home/Draws/Away: 49/51/0
+Home TDs per game: 0.57
+Away TDs per game: 0.0
+
+epoch 23
+Home/Draws/Away: 72/28/0
+Home TDs per game: 1.09
+Away TDs per game: 0.0
+
+epoch 24 
+Home/Draws/Away: 61/39/0
+Home TDs per game: 0.92
+Away TDs per game: 0.0
+
+epoch 25
+Home/Draws/Away: 66/34/0
+Home TDs per game: 0.96
+Away TDs per game: 0.0
+
+epoch 26
+Home/Draws/Away: 60/40/0
+Home TDs per game: 0.74
+Away TDs per game: 0.0
+
+epoch 27
+Home/Draws/Away: 71/29/0
+Home TDs per game: 0.96
+Away TDs per game: 0.0
+
+epoch 28
+Home/Draws/Away: 70/30/0
+Home TDs per game: 0.97
+Away TDs per game: 0.0
+
+
+epoch 21
+Home/Draws/Away: 76/24/0
+Home TDs per game: 1.15
+Away TDs per game: 0.0
+
+
+A2C - 10M
+Home/Draws/Away: 74/26/0
+Home TDs per game: 1.02
+Away TDs per game: 0.0
+
+A2C - no bc 
+Home/Draws/Away: 78/22/0
+Home TDs per game: 1.14
+Away TDs per game: 0.0
+
+A2C - no bc vs scripted
+Home/Draws/Away: 0/13/87
+Home TDs per game: 0.06
+Away TDs per game: 1.74
