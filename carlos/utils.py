@@ -6,7 +6,7 @@ from botbowl.core.model import Action
 import torch
 import numpy as np
 # from agents.carlos_agent import CNNPolicy
-from botbowl.ai.new_env import NewBotBowlEnv
+from botbowl.ai.env import BotBowlEnv
 import gym
 import torch.optim as optim
 import torch.nn as nn
@@ -72,9 +72,9 @@ def actions_stats():
     board_squares = spatial_obs_space[1] * spatial_obs_space[2]
  
     non_spatial_obs_space = env.observation_space.spaces['state'].shape[0] + env.observation_space.spaces['procedures'].shape[0] + env.observation_space.spaces['available-action-types'].shape[0]
-    non_spatial_action_types = NewBotBowlEnv.simple_action_types + NewBotBowlEnv.defensive_formation_action_types + NewBotBowlEnv.offensive_formation_action_types
+    non_spatial_action_types = BotBowlEnv.simple_action_types + BotBowlEnv.defensive_formation_action_types + BotBowlEnv.offensive_formation_action_types
     num_non_spatial_action_types = len(non_spatial_action_types)
-    spatial_action_types = NewBotBowlEnv.positional_action_types
+    spatial_action_types = BotBowlEnv.positional_action_types
     num_spatial_action_types = len(spatial_action_types)
     num_spatial_actions = num_spatial_action_types * spatial_obs_space[1] * spatial_obs_space[2]
     action_space = num_non_spatial_action_types + num_spatial_actions
@@ -306,7 +306,7 @@ num_hidden_nodes = 1024
 num_cnn_kernels = [128, 64, 17]
 
 def make_env():
-    env = NewBotBowlEnv()
+    env = BotBowlEnv()
     return env
 
 def main():
@@ -343,10 +343,11 @@ def main():
     # num_spatial_action_types = len(spatial_action_types)
     # num_spatial_actions = num_spatial_action_types * spatial_obs_space[1] * spatial_obs_space[2]
     # action_space = num_non_spatial_action_types + num_spatial_actions
-    filename = "epoch-19.pth"
-    state_dict_file = torch.load(filename)
+
+    # filename = "epoch-19.pth"
+    # state_dict_file = torch.load(filename)
     model = CNNPolicy(spatial_obs_space, non_spatial_obs_space, hidden_nodes=num_hidden_nodes, kernels=num_cnn_kernels, actions=action_space)
-    model.load_state_dict(state_dict_file['model_state_dict'])
+    # model.load_state_dict(state_dict_file['model_state_dict'])
    
     # pair = load_example()
     # spatial_obs = pair['obs']['spatial_obs']
@@ -365,7 +366,7 @@ def main():
  
     loss_function = nn.NLLLoss()
     optimizer = optim.RAdam(model.parameters(), lr=0.0001, weight_decay=0.00001)
-    optimizer.load_state_dict(state_dict_file['optimizer_state_dict'])
+    # optimizer.load_state_dict(state_dict_file['optimizer_state_dict'])
  
     train_losses=[]
     train_accu=[]
@@ -374,7 +375,7 @@ def main():
     eval_accu=[]
 
    
-    for epoch in range(20, 30):
+    for epoch in range(30):
         start_time = time.time()
         epoch_loss, epoch_accu = train(epoch, trainloader, model, device, optimizer, loss_function)
         print('---Train takes: %s seconds ---' %(time.time() - start_time))
@@ -410,12 +411,19 @@ def main():
     plt.close()
 
     print('Finished Training')
- 
+
+import csv
+def testcsv():
+    with open('logs/botbowl-11/5de641f4-7f9d-11ec-b508-ec63d79c77d6.dat', newline='') as csvfile:
+        reader = csv.reader(csvfile)
+        for row in reader:
+            print(row[1].strip())
  
 if __name__ == "__main__":
-    create_dataset()
+    # create_dataset()
     # actions_stats()
-    main()
+    # main()
+    testcsv()
  
         # running_loss = 0.0
         # for i, data in enumerate(trainloader, 0):

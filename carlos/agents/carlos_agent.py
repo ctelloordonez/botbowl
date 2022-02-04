@@ -1,23 +1,26 @@
 from ctypes import c_int
 import os
 import gym
-from botbowl import NewBotBowlEnv
+from botbowl import BotBowlEnv
 from torch.autograd import Variable
 import botbowl
 from botbowl.ai.layers import *
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from botbowl.ai.new_env import EnvConf
+from botbowl.ai.env import EnvConf
 from botbowl.core.util import get_data_path
 from examples.scripted_bot_example import MyScriptedBot
  
  
 # Architecture
-model_name = 'epoch-28'
+model_name = 'epoch-21'
 env_name = 'botbowl-v3'
-model_filename = f"carlos/data/models/{model_name}.pth"
+# model_filename = f"carlos/data/models/{model_name}.pth"
+model_filename = f"models/botbowl-11/db11c4c2-8206-11ec-8e41-ec63d79c77d6.nn"
+# model_filename = f"models/botbowl-11/103bdd76-8107-11ec-b0ef-ec63d79c77d6.nn"
 log_filename = f"logs/{env_name}/{env_name}.dat"
+deploy = True
  
 # Environment
  
@@ -91,6 +94,8 @@ class CNNPolicy(nn.Module):
  
     def __init__(self, spatial_shape, non_spatial_inputs, actions, hidden_nodes=num_hidden_nodes, kernels=num_cnn_kernels):
         super(CNNPolicy, self).__init__()
+        self.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        if debug: print('Device ', self.device)
  
         # Spatial input stream
         self.conv_init = nn.Conv2d(in_channels=spatial_shape[0], out_channels=kernels[0], kernel_size=3, stride=1, padding=1)
@@ -162,8 +167,8 @@ class CNNPolicy(nn.Module):
         The forward functions defines how the data flows through the graph (layers)
         """
         # Spatial input through residual blocks
-        # spatial_input = torch.reshape(spatial_input, (1, 44, 17, 28))
-        # non_spatial_input = torch.reshape(non_spatial_input, (1, 116))
+        if deploy: spatial_input = torch.reshape(spatial_input, (1, 44, 17, 28))
+        if deploy: non_spatial_input = torch.reshape(non_spatial_input, (1, 116))
         x1 = self.conv_init(spatial_input)
         x1 = F.leaky_relu(x1)
         if debug: print(x1.size())
@@ -254,16 +259,20 @@ class CNNPolicy(nn.Module):
     def act(self, spatial_inputs, non_spatial_input, action_mask):
         values, action_probs = self.get_action_probs(spatial_inputs, non_spatial_input, action_mask=action_mask)
         actions = action_probs.multinomial(1)
+        _action_probs = action_probs.cpu().detach().numpy()
+        _actions = actions.cpu().detach().numpy()
+        for i, action_prob in enumerate(action_probs[0]):
+            print(f'{i}: {action_prob}')
         return values, actions
  
     def evaluate_actions(self, spatial_inputs, non_spatial_input, actions, actions_mask):
         value, policy = self(spatial_inputs, non_spatial_input)
-        actions_mask = actions_mask.view(-1, 1, actions_mask.shape[2]).squeeze().bool()
+        # actions_mask = actions_mask.view(-1, 1, actions_mask.shape[2]).squeeze().bool()
         policy[~actions_mask] = float('-inf')
         log_probs = F.log_softmax(policy, dim=1)
         probs = F.softmax(policy, dim=1)
         action_log_probs = log_probs.gather(1, actions)
-        log_probs = torch.where(log_probs[None, :] == float('-inf'), torch.tensor(0.), log_probs)
+        log_probs = torch.where(log_probs[None, :] == float('-inf'), torch.tensor(0.).cuda(), log_probs)
         dist_entropy = -(log_probs * probs).sum(-1).mean()
         return action_log_probs, value, dist_entropy
  
@@ -271,9 +280,12 @@ class CNNPolicy(nn.Module):
         values, actions = self(spatial_input, non_spatial_input)
         # Masking step: Inspired by: http://juditacs.github.io/2018/12/27/masked-attention.html
         if action_mask is not None:
-            # action_mask = torch.reshape(action_mask, (1, 8117))
+            if deploy: action_mask = torch.reshape(action_mask, (1, 8117))
             actions[~action_mask] = float('-inf')
         action_probs = F.softmax(actions, dim=1)
+        _acton_mask = action_mask.cpu().detach().numpy()
+        _actions = actions.cpu().detach().numpy()
+        _action_probs = action_probs.cpu().detach().numpy()
         return values, action_probs
  
     def get_action_log_probs(self, spatial_input, non_spatial_input, action_mask=None):
@@ -286,7 +298,7 @@ class CNNPolicy(nn.Module):
  
  
 class CopiedAgent(Agent):
-    env: NewBotBowlEnv
+    env: BotBowlEnv
  
     def __init__(self, name, 
                  env_conf: EnvConf,
@@ -297,7 +309,7 @@ class CopiedAgent(Agent):
         self.is_home = True
         self.action_queue = []
 
-        self.env = NewBotBowlEnv(env_conf)
+        self.env = BotBowlEnv(env_conf)
         self.env.reset()
         self.exclude_pathfinding_moves = exclude_pathfinding_moves
 
@@ -310,9 +322,14 @@ class CopiedAgent(Agent):
                                  hidden_nodes=num_hidden_nodes, 
                                  kernels=num_cnn_kernels, 
                                  actions=action_space)
+
+        # self.policy = torch.load(filename)
         state_dict_file = torch.load(filename)
         self.policy.load_state_dict(state_dict_file['model_state_dict'])
         self.policy.eval()
+        self.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        if debug: print('Device ', self.device)
+        self.policy.to(self.device)
         # self.end_setup = False
  
     def new_game(self, game, team):
@@ -347,10 +364,11 @@ class CopiedAgent(Agent):
         
         # spatial_obs, non_spatial_obs, action_mask = tuple(map(torch.from_numpy, self.env.get_state()))
         spatial_obs, non_spatial_obs, action_mask = self.env.get_state()
-        spatial_obs = torch.from_numpy(np.stack(spatial_obs)).float()
-        non_spatial_obs = torch.from_numpy(np.stack(non_spatial_obs)).float()
+        spatial_obs = torch.from_numpy(np.stack(spatial_obs)).float().to(self.device)
+        non_spatial_obs = torch.from_numpy(np.stack(non_spatial_obs)).float().to(self.device)
         action_mask = np.array(action_mask)
-        action_mask = torch.tensor(action_mask, dtype=torch.bool)
+        action_mask = torch.tensor(action_mask, dtype=torch.bool).to(self.device)
+        print(action_mask)
 
 
         values, actions = self.policy.act(
@@ -360,8 +378,9 @@ class CopiedAgent(Agent):
  
         # Create action from output
         action_idx = actions[0]
+        
         value = values[0]
-        action_objects = self.env._compute_action(action_idx.numpy()[0], flip=False)
+        action_objects = self.env._compute_action(action_idx.cpu().numpy()[0], flip=False)
         # position = Square(x, y) if action_type in NewBotBowlEnv.positional_action_types else None
         # action = botbowl.Action(action_type, position=position, player=None)
  
@@ -472,15 +491,22 @@ def load_pair():
 def _make_my_copied_bot(name):
     return CopiedAgent(name=name,
                     env_conf=EnvConf(),
-                    filename=model_filename,
+                    filename="carlos/data/models/epoch-21.pth",
+                    exclude_pathfinding_moves=True)
+
+def _make_my_copied_a2c(name):
+    return CopiedAgent(name=name,
+                    env_conf=EnvConf(),
+                    filename="models/botbowl-11/db11c4c2-8206-11ec-8e41-ec63d79c77d6.nn",
                     exclude_pathfinding_moves=True)
 
 
 # Register the bot to the framework
-botbowl.register_bot('my-copied-bot', _make_my_copied_bot)
 
 
 if __name__ == "__main__":
+    botbowl.register_bot('my-copied-a2c', _make_my_copied_a2c) 
+    botbowl.register_bot('my-copied-bot', _make_my_copied_bot) 
     # state_dic =torch.load(f"ffai/data/models/{model_name}.pth")
     # print(state_dic.keys())
     # Load configurations, rules, arena and teams
@@ -516,7 +542,7 @@ if __name__ == "__main__":
         game = botbowl.Game(i, home, away, home_agent, away_agent, config, arena=arena, ruleset=ruleset)
         game.config.fast_mode = True
 
-        # print("Starting game", (i+1))
+        print("Starting game", (i+1))
         game.init()
         # print("Game is over")
 

@@ -11,11 +11,13 @@ from torch.autograd import Variable
 from torch.utils.data import TensorDataset, DataLoader
 
 import botbowl
-from botbowl.ai.env import BotBowlEnv, RewardWrapper, EnvConf, ScriptedActionWrapper, BotBowlWrapper
+from botbowl.ai.env import BotBowlEnv, RewardWrapper, EnvConf, ScriptedActionWrapper, BotBowlWrapper, PPCGWrapper
 from carlos.agents.carlos_agent import CopiedAgent, CNNPolicy
-from carlos.utils import load_dataset, make_trainset, get_data_path
-from a2c_env import A2C_Reward, a2c_scripted_actions
+from carlos.utils import load_dataset, make_trainset
+from a2c_env import A2C_Reward
 from botbowl.ai.layers import *
+
+import csv
 
 # Environment
 env_size = 11
@@ -24,12 +26,14 @@ env_name = f"botbowl-{env_size}"
 env_conf = EnvConf(size=env_size)
 
 
-make_agent_from_model = partial(CopiedAgent,
+make_agent_from_model = partial(CopiedAgent, 
                                 env_conf=env_conf)
 
 
 def make_env():
     env = BotBowlEnv(env_conf)
+    # if ppcg:
+    #     env = PPCGWrapper(env)
     # env = ScriptedActionWrapper(env, scripted_func=a2c_scripted_actions)
     env = RewardWrapper(env, home_reward_func=A2C_Reward())
     return env
@@ -39,7 +43,8 @@ def make_env():
 CRl = 40
 CBc = 40
 batch_size = 5
-num_steps = 12000000
+
+num_steps = 4000000
 num_processes = 5
 steps_per_update = 40
 learning_rate = 0.000005
@@ -74,13 +79,13 @@ def ensure_dir(file_path):
         os.makedirs(directory)
 
 
-ensure_dir("logs/")
-ensure_dir("models/")
-ensure_dir("plots/")
+ensure_dir("carlos/data/a2c/logs/")
+ensure_dir("calos/data/a2c/models/")
+ensure_dir("carlos/data/a2c/plots/")
 exp_id = str(uuid.uuid1())
-log_dir = f"logs/{env_name}/"
-model_dir = f"models/{env_name}/"
-plot_dir = f"plots/{env_name}/"
+log_dir = f"carlos/data/a2c/logs/{env_name}/"
+model_dir = f"calos/data/a2c/models/{env_name}/"
+plot_dir = f"carlos/data/a2c/plots/{env_name}/"
 ensure_dir(log_dir)
 ensure_dir(model_dir)
 ensure_dir(plot_dir)
@@ -129,30 +134,21 @@ def worker(remote, parent_remote, env: BotBowlWrapper, worker_id):
     tds_opp = 0
     next_opp = botbowl.make_bot('scripted')
 
+    ppcg_wrapper: Optional[PPCGWrapper] = env.get_wrapper_with_type(PPCGWrapper)
+
     while True:
         command, data = remote.recv()
         if command == 'step':
             steps += 1
             action, dif = data[0], data[1]
+            if ppcg_wrapper is not None:
+                ppcg_wrapper.difficulty = dif
+
             spatial_obs, reward, done, info = env.step(action)
             non_spatial_obs = info['non_spatial_obs']
             action_mask = info['action_mask']
 
-            game: Game = env.game
-
-            # PPCG
-            if dif < 1.0:
-                ball_carrier = game.get_ball_carrier()
-                if ball_carrier and ball_carrier.team == env.game.state.home_team:
-                    extra_endzone_squares = int((1.0 - dif) * 25.0)
-                    distance_to_endzone = ball_carrier.position.x - 1
-                    if distance_to_endzone <= extra_endzone_squares:
-                        game.state.stack.push(Touchdown(env.game, ball_carrier))
-                        game.set_available_actions()
-                        spatial_obs, reward, done, info = env.step(None)
-                        non_spatial_obs = info['non_spatial_obs']
-                        action_mask = info['action_mask']
-
+            game = env.game
             tds_scored = game.state.home_team.state.score - tds
             tds_opp_scored = game.state.away_team.state.score - tds_opp
             tds = game.state.home_team.state.score
@@ -239,66 +235,56 @@ class VecEnv:
 
 
 def main():
-    torch.cuda.empty_cache()
+    envs = VecEnv([make_env() for _ in range(num_processes)])
 
     env = make_env()
     env.reset()
     spat_obs, non_spat_obs, action_mask = env.get_state()
+    del env
     spatial_obs_space = spat_obs.shape
     non_spatial_obs_space = non_spat_obs.shape[0]
     action_space = len(action_mask)
 
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-    print('Device ', device)
-    # model.load_state_dict(state_dict_file['model_state_dict'])
     # MODEL
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
     ac_agent = CNNPolicy(spatial_obs_space,
                          non_spatial_obs_space,
                          hidden_nodes=num_hidden_nodes,
                          kernels=num_cnn_kernels,
                          actions=action_space)
-    # model_dir = get_data_path('models')
-    # PATH = os.path.join(model_dir, 'carlos/data/models/epoch-29.pth')
-    state_dict_file = torch.load('carlos/data/models/epoch-29.pth')
-    ac_agent.load_state_dict(state_dict_file['model_state_dict'])
+
+    ac_agent = torch.load('models/botbowl-11/103bdd76-8107-11ec-b0ef-ec63d79c77d6.nn')
+    # ac_agent.load_state_dict(state_dict_file['model_state_dict'])
 
     ac_agent.to(device)
-
-    loss_function = nn.NLLLoss()
-    # OPTIMIZER
-    optimizer = optim.RAdam(ac_agent.parameters(), lr=learning_rate, weight_decay=0.00001)
     
     dataset = load_dataset()
- 
     trainset = make_trainset(dataset)
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
-                                                shuffle=True, num_workers=0)
+    # Dataset
+    trainloader = DataLoader(trainset, batch_size=batch_size, 
+                            shuffle=True, num_workers=0)
 
     del dataset
- 
+    del trainset
+
+    loss_function = nn.NLLLoss()
+
+    # OPTIMIZER
+    optimizer = optim.RAdam(ac_agent.parameters(), lr=learning_rate, weight_decay=0.00001)
+
     # MEMORY STORE
     memory = Memory(steps_per_update, num_processes, spatial_obs_space, (1, non_spatial_obs_space), action_space)
     memory.cuda()
+
     # PPCG
     difficulty = 0.0 if ppcg else 1.0
     dif_delta = 0.01
-
-    # Reset environments
-    envs = VecEnv([make_env() for _ in range(num_processes)])
-
-    spatial_obs, non_spatial_obs, action_masks, _, _, _, _ = map(torch.from_numpy, envs.reset(difficulty))
-    non_spatial_obs = torch.unsqueeze(non_spatial_obs, dim=1)
-
-    # Add obs to memory
-    memory.spatial_obs[0].copy_(spatial_obs)
-    memory.non_spatial_obs[0].copy_(non_spatial_obs)
-    memory.action_masks[0].copy_(action_masks)
 
     # Variables for storing stats
     all_updates = 0
     all_episodes = 0
     all_steps = 0
-    rl_steps = 0
+    rl_steps = 0 
     bc_steps = 0
     start_bc = 0
     episodes = 0
@@ -320,6 +306,18 @@ def main():
     log_mean_reward = []
     log_difficulty = []
 
+    
+    # with open('logs/botbowl-11/5de641f4-7f9d-11ec-b508-ec63d79c77d6.dat', newline='') as csvfile:
+    #     reader = csv.reader(csvfile)
+    #     for row in reader:
+    #         log_updates.append(int(row[0]))
+    #         log_episode.append(int(row[1].strip()))
+    #         log_steps.append(int(row[2].strip()))
+    #         log_win_rate.append(float(row[3].strip()))
+    #         log_td_rate.append(float(row[4].strip()))
+    #         log_td_rate_opp.append(float(row[5].strip()))
+    #         log_mean_reward.append(float(row[6].strip()))
+
     # self-play
     selfplay_next_save = selfplay_save_steps
     selfplay_next_swap = selfplay_swap_steps
@@ -329,18 +327,26 @@ def main():
         model_name = f"{exp_id}_selfplay_0.nn"
         model_path = os.path.join(model_dir, model_name)
         torch.save(ac_agent, model_path)
-        envs.swap(make_agent_from_model(name=model_name, filename=model_path))
+        self_play_agent = make_agent_from_model(name=model_name, filename=model_path)
+        envs.swap(self_play_agent)
         selfplay_models += 1
 
+    # Reset environments
+    spatial_obs, non_spatial_obs, action_masks, _, _, _, _ = map(torch.from_numpy, envs.reset(difficulty))
+
+    # Add obs to memory
+    non_spatial_obs = torch.unsqueeze(non_spatial_obs, dim=1)
+    memory.spatial_obs[0].copy_(spatial_obs)
+    memory.non_spatial_obs[0].copy_(non_spatial_obs)
+    memory.action_masks[0].copy_(action_masks)
+
     while all_steps < num_steps:
-        torch.cuda.empty_cache()
-        if all_steps % log_interval: print(f'steps: {all_steps}')
+        if all_steps % log_interval == 0: print(f'steps: {all_steps}')
         if rl_steps < CRl:
-            count = 0
+
             for step in range(steps_per_update):
-                # print(count)
-                count += 1
-                values, actions = ac_agent.act(
+
+                _, actions = ac_agent.act(
                     Variable(memory.spatial_obs[step]),
                     Variable(memory.non_spatial_obs[step]),
                     Variable(memory.action_masks[step]))
@@ -382,6 +388,9 @@ def main():
 
                 memory.insert(step, spatial_obs, non_spatial_obs, actions.data, shaped_reward, masks, action_masks)
 
+            # -- TRAINING -- #
+
+            # bootstrap next value
             next_value = ac_agent(Variable(memory.spatial_obs[-1], requires_grad=False), Variable(memory.non_spatial_obs[-1], requires_grad=False))[0].data
 
             # Compute returns
@@ -392,18 +401,18 @@ def main():
             non_spatial = Variable(memory.non_spatial_obs[:-1])
             non_spatial = non_spatial.view(-1, non_spatial.shape[-1])
 
-            actions = Variable(torch.LongTensor(memory.actions.cpu().view(-1, 1)))
+            actions = Variable(torch.LongTensor(memory.actions.cpu().view(-1, 1))).to(device)
             actions_mask = Variable(memory.action_masks[:-1])
             actions_mask = actions_mask.view(-1, action_space)
 
             returns = Variable(memory.returns[:-1])
-            # print(returns.shape)
             returns = returns.view(-1, 1)
+            
             # print(spatial.shape, non_spatial.shape, actions.shape, actions_mask.shape, returns.shape)
-            evaluationloader = DataLoader(TensorDataset(spatial, non_spatial, actions, actions_mask, returns), 
-                                            batch_size= batch_size, shuffle=True, num_workers=0)
+            evaluation_loader = DataLoader(TensorDataset(spatial, non_spatial, actions, actions_mask, returns),
+                                            batch_size=batch_size, shuffle=True, num_workers=0)
 
-            for j, eval_data in enumerate(evaluationloader, 0):
+            for j, eval_data in enumerate(evaluation_loader, 0):
                 eval_spatial_obs, eval_non_spatial_obs, eval_actions, eval_actions_mask, eval_returns = eval_data
                 eval_spatial_obs = eval_spatial_obs.to(device)
                 eval_non_spatial_obs = eval_non_spatial_obs.to(device)
@@ -411,17 +420,12 @@ def main():
                 eval_actions_mask = eval_actions_mask.to(device)
 
                 # Evaluate the actions taken
-                action_log_probs, values, dist_entropy = ac_agent.evaluate_actions(eval_spatial_obs, 
-                                                                                    eval_non_spatial_obs, 
-                                                                                    eval_actions, 
-                                                                                    eval_actions_mask)
-                # print(values.shape)
-                # print(action_log_probs.shape)
-                # print(eval_returns.shape)
-                # values = values.view(steps_per_update, num_processes, 1)
-                # action_log_probs = action_log_probs.view(steps_per_update, num_processes, 1)
+                action_log_probs, values, dist_entropy = ac_agent.evaluate_actions(spatial, non_spatial, actions, actions_mask)
 
-                advantages = eval_returns - values
+                values = values.view(steps_per_update, num_processes, 1)
+                action_log_probs = action_log_probs.view(steps_per_update, num_processes, 1)
+
+                advantages = Variable(memory.returns[:-1]) - values
                 value_loss = advantages.pow(2).mean()
                 #value_losses.append(value_loss)
 
@@ -460,7 +464,6 @@ def main():
                 selfplay_models += 1
 
             # Self-play swap
-
             if selfplay and all_steps >= selfplay_next_swap:
                 selfplay_next_swap = max(all_steps + 1, selfplay_next_swap+selfplay_swap_steps)
                 lower = max(0, selfplay_models-1-(selfplay_window-1))
@@ -469,58 +472,58 @@ def main():
                 model_path = os.path.join(model_dir, model_name)
                 print(f"Swapping opponent to {model_path}")
                 envs.swap(make_agent_from_model(name=model_name, filename=model_path))
-        
+
             rl_steps += 1
         
-        elif bc_steps < CBc:
-            epoch_loss = []
-            epoch_accu = []
+        # elif bc_steps < CBc:
+        #     epoch_loss = []
+        #     epoch_accu = []
 
-            running_loss = 0
-            correct = 0
-            total = 0
-            if steps_per_update + start_bc >= len(trainloader):
-                start_bc = 0
+        #     running_loss = 0
+        #     correct = 0
+        #     total = 0
+        #     if steps_per_update + start_bc >= len(trainloader):
+        #         start_bc = 0
 
-            for i, data in enumerate(trainloader, start_bc):
-                if i >= steps_per_update + start_bc:
-                    break
-                # get the inputs; data is a list of [inputs, labels]
-                spatial_obs, non_spatial_obs, actions = data
-                # print(spatial_obs.shape)
-                spatial_obs = spatial_obs.to(device)
-                non_spatial_obs = non_spatial_obs.to(device)
-                actions = actions.to(device)
+        #     for i, data in enumerate(trainloader, start_bc):
+        #         if i >= steps_per_update + start_bc:
+        #             break
+        #         # get the inputs; data is a list of [inputs, labels]
+        #         spatial_obs, non_spatial_obs, actions = data
+        #         # print(spatial_obs.shape)
+        #         spatial_obs = spatial_obs.to(device)
+        #         non_spatial_obs = non_spatial_obs.to(device)
+        #         actions = actions.to(device)
         
-                # zero the parameter gradients
-                optimizer.zero_grad()
+        #         # zero the parameter gradients
+        #         optimizer.zero_grad()
         
-                # forward + backward + optimize
-                values, action_log_probs, = ac_agent.get_action_log_probs(spatial_obs, non_spatial_obs)
-                # action_log_probs = torch.where(action_log_probs == float('-inf'), torch.tensor(0., device=device), action_log_probs)
-                # print(spatial_obs.size(), non_spatial_obs.size(), actions.size(), outputs[1].size())
-                # print(actions)
-                loss = loss_function(action_log_probs, actions)
-                loss.backward()
-                optimizer.step()
+        #         # forward + backward + optimize
+        #         values, action_log_probs, = ac_agent.get_action_log_probs(spatial_obs, non_spatial_obs)
+        #         # action_log_probs = torch.where(action_log_probs == float('-inf'), torch.tensor(0., device=device), action_log_probs)
+        #         # print(spatial_obs.size(), non_spatial_obs.size(), actions.size(), outputs[1].size())
+        #         # print(actions)
+        #         loss = loss_function(action_log_probs, actions)
+        #         loss.backward()
+        #         optimizer.step()
                 
-                running_loss += loss.item()
-                _, predicted = action_log_probs.max(1)
-                total += actions.size(0)
-                correct += predicted.eq(actions).sum().item()
+        #         running_loss += loss.item()
+        #         _, predicted = action_log_probs.max(1)
+        #         total += actions.size(0)
+        #         correct += predicted.eq(actions).sum().item()
 
-                epoch_loss.append(loss.item())
-                epoch_accu.append(100* predicted.eq(actions).sum().item()/actions.size(0))
+        #         epoch_loss.append(loss.item())
+        #         epoch_accu.append(100* predicted.eq(actions).sum().item()/actions.size(0))
 
-                all_steps += batch_size
+        #         all_steps += batch_size
             
-            train_loss=running_loss/len(trainloader)
-            accu=100.*correct/total
+        #     train_loss=running_loss/len(trainloader)
+        #     accu=100.*correct/total
 
-            print('Train Loss: %.3f | Accuracy: %.3f'%(train_loss,accu))   
-            start_bc += steps_per_update
+        #     print('Train Loss: %.3f | Accuracy: %.3f'%(train_loss,accu))   
+        #     start_bc += steps_per_update
 
-            bc_steps += 1
+        #     bc_steps += 1
 
         else:
             rl_steps = 0
@@ -546,9 +549,9 @@ def main():
             log_mean_reward.append(mean_reward)
             log_difficulty.append(difficulty)
 
-            log = "Upd: {}, Ep: {}, Win: {:.2f}, TD: {:.2f}, TD opp: {:.2f}, Mean reward: {:.3f}, Difficulty: {:.2f}" \
-                .format(all_updates, all_episodes, win_rate, td_rate, td_rate_opp, mean_reward, difficulty)
-            """
+            log = "Updates: {}, Episodes: {}, Timesteps: {}, Win rate: {:.2f}, TD rate: {:.2f}, TD rate opp: {:.2f}, Mean reward: {:.3f}, Difficulty: {:.2f}" \
+                .format(all_updates, all_episodes, all_steps, win_rate, td_rate, td_rate_opp, mean_reward, difficulty)
+
             log_to_file = "{}, {}, {}, {}, {}, {}, {}\n" \
                 .format(all_updates, all_episodes, all_steps, win_rate, td_rate, td_rate_opp, mean_reward, difficulty)
 
@@ -557,7 +560,7 @@ def main():
             print(f"Save log to {log_path}")
             with open(log_path, "a") as myfile:
                 myfile.write(log_to_file)
-            """
+
             print(log)
 
             episodes = 0

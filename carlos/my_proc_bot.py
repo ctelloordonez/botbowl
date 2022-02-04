@@ -5,13 +5,12 @@ Year: 2018
 ==========================
 This module contains an example bot that takes random actions.
 """
-from botbowl import Action
 import botbowl
-from botbowl.core.model import Agent
+from botbowl.core.model import Agent, Action
+from botbowl.core.game import Game, InvalidActionError
 from botbowl.core.procedure import *
+from botbowl.ai.env import BotBowlEnv
 import torch
-import gym
-from botbowl.ai.new_env import NewBotBowlEnv, EnvConf
 import uuid
 from carlos.utils import get_data_path
 
@@ -41,74 +40,10 @@ class MyProcBot(Agent):
 
     def __init__(self, name):
         super().__init__(name)
-
-        self.env = NewBotBowlEnv()
+        self.pairs = []
+        self.env = BotBowlEnv()
         self.env_conf = self.env.env_conf
         self.rnd = np.random.RandomState(None)
-        # spatial_obs_space = self.env.observation_space.spaces['board'].shape
-        # self.board_dim = (spatial_obs_space[1], spatial_obs_space[2])
-        # self.board_squares = spatial_obs_space[1] * spatial_obs_space[2]
-        
-        # self.non_spatial_action_types = NewBotBowlEnv.simple_action_types + NewBotBowlEnv.defensive_formation_action_types + NewBotBowlEnv.offensive_formation_action_types
-        # self.num_non_spatial_action_types = len(self.non_spatial_action_types)
-        # self.spatial_action_types = NewBotBowlEnv.positional_action_types
-        # self.num_spatial_action_types = len(self.spatial_action_types)
-        # self.num_spatial_actions = self.num_spatial_action_types * spatial_obs_space[1] * spatial_obs_space[2]
-        # self.action_space = self.num_non_spatial_action_types + self.num_spatial_actions
-
-
-    # def compute_action(self, action_idx):
-    #     if action_idx < len(self.non_spatial_action_types):
-    #         return self.non_spatial_action_types[action_idx], 0, 0
-    #     spatial_idx = action_idx - self.num_non_spatial_action_types
-    #     spatial_pos_idx = spatial_idx % self.board_squares
-    #     spatial_y = int(spatial_pos_idx / self.board_dim[1])
-    #     spatial_x = int(spatial_pos_idx % self.board_dim[1])
-    #     spatial_action_type_idx = int(spatial_idx / self.board_squares)
-    #     spatial_action_type = self.spatial_action_types[spatial_action_type_idx]
-    #     return spatial_action_type, spatial_x, spatial_y
-
-    # def get_action_idx(self, action):
-    #     if action.action_type in self.non_spatial_action_types:
-    #         return self.non_spatial_action_types.index(action.action_type)
-
-    #     if action.action_type in self.spatial_action_types:
-    #         spatial_action_type_idx = self.spatial_action_types.index(action.action_type)
-    #         spatial_idx = spatial_action_type_idx * self.board_squares
-    #         if action.position is None and action.player is not None:
-    #             action.position = action.player.position
-    #         if action.position is None:
-    #             return -1
-    #         spatial_pos_idx = action.position.y * self.board_dim[1] + action.position.x
-    #         return self.num_non_spatial_action_types + spatial_idx + spatial_pos_idx
-
-    #     return -1
-
-    # def _update_obs(self, observations):
-    #     """
-    #     Takes the observation returned by the environment and transforms it to an numpy array that contains all of
-    #     the feature layers and non-spatial info.
-    #     """
-    #     spatial_obs = []
-    #     non_spatial_obs = []
-
-    #     for obs in observations:
-    #         spatial_ob = np.stack(obs['board'].values())
-
-    #         state = list(obs['state'].values())
-    #         procedures = list(obs['procedures'].values())
-    #         actions = list(obs['available-action-types'].values())
-
-    #         non_spatial_ob = np.stack(state+procedures+actions)
-
-    #         # feature_layers = np.expand_dims(feature_layers, axis=0)
-    #         non_spatial_ob = np.expand_dims(non_spatial_ob, axis=0)
-
-    #         spatial_obs.append(spatial_ob)
-    #         non_spatial_obs.append(non_spatial_ob)
-
-    #     return torch.from_numpy(np.stack(spatial_obs)).float(), torch.from_numpy(np.stack(non_spatial_obs)).float()
-
     
     def act(self, game):
         action = self.act2(game)
@@ -122,20 +57,6 @@ class MyProcBot(Agent):
                 action_idx = -1
         if action_idx != -1:
             action_array = np.array([action_idx])
-            # action_array = np.zeros(self.action_space)
-            # action_array[action_idx] = 1
-
-            # action_type, x, y = self.compute_action(action_idx)
-            # position = Square(x, y) if action_type in NewBotBowlEnv.positional_action_types else None
-            # comp_action = botbowl.Action(action_type, position=position, player=None)
-            # print(action.action_type == comp_action.action_type and action.position == comp_action.position)
-            # print(action.to_json())
-            # print(comp_action.to_json())
-
-            # self.env.game = game
-            # observation = self.env.get_state()
-            # obs = [observation]
-            # spatial_obs, non_spatial_obs, action_mask = tuple(map(torch.from_numpy, self.env.get_state()))
             
             spatial_obs, non_spatial_obs, action_mask = self.env.get_state()
             spatial_obs = torch.from_numpy(np.stack(spatial_obs)).float()
@@ -145,31 +66,10 @@ class MyProcBot(Agent):
                 'non_spatial_obs': non_spatial_obs
             }
             pair = Pair(obs=obs, action=torch.from_numpy(np.stack(action_array)).float())
+            self.pairs.append(pair)
             # print("done")
-            pair.dump()
+            # pair.dump()
 
-        if action is None and len(game.state.available_actions) > 0:
-            action = self.random_action(game)
-
-        if not game._is_action_allowed(action):
-            action = self.random_action(game)
-
-        return action
-
-    def random_action(self, game):
-        # Select a random action type
-        while True:
-            action_choice = self.rnd.choice(game.state.available_actions)
-            # Ignore PLACE_PLAYER actions
-            if action_choice.action_type != botbowl.ActionType.PLACE_PLAYER:
-                break
-
-        # Select a random position and/or player
-        position = self.rnd.choice(action_choice.positions) if len(action_choice.positions) > 0 else None
-        player = self.rnd.choice(action_choice.players) if len(action_choice.players) > 0 else None
-
-        # Make action object
-        action = botbowl.Action(action_choice.action_type, position=position, player=player)
         return action
 
     def act2(self, game):
@@ -177,70 +77,90 @@ class MyProcBot(Agent):
         # Get current procedure
         proc = game.get_procedure()
         # print(type(proc))
-
+        
+        action: Optional[Action] = None
+        
         # Call private function
         if isinstance(proc, CoinTossFlip):
-            return self.coin_toss_flip(game)
-        if isinstance(proc, CoinTossKickReceive):
-            return self.coin_toss_kick_receive(game)
-        if isinstance(proc, Setup):
-            return self.setup(game)
-        if isinstance(proc, Ejection):
-            return self.use_bribe(game)
-        if isinstance(proc, Reroll):
+            action = self.coin_toss_flip(game)
+        elif isinstance(proc, CoinTossKickReceive):
+            action = self.coin_toss_kick_receive(game)
+        elif isinstance(proc, Setup):
+            if proc.reorganize:
+                action = self.perfect_defense(game)
+            else:
+                action = self.setup(game)
+        elif isinstance(proc, Ejection):
+            action = self.use_bribe(game)
+        elif isinstance(proc, Reroll):
             if proc.can_use_pro:
-                return self.use_pro(game)
-            return self.reroll(game)
-        if isinstance(proc, PlaceBall):
-            return self.place_ball(game)
-        if isinstance(proc, HighKick):
-            return self.high_kick(game)
-        if isinstance(proc, Touchback):
-            return self.touchback(game)
-        if isinstance(proc, Turn) and proc.quick_snap:
-            return self.quick_snap(game)
-        if isinstance(proc, Turn) and proc.blitz:
-            return self.blitz(game)
-        if isinstance(proc, Turn):
-            return self.turn(game)
-        if isinstance(proc, MoveAction):
-            return self.player_action(game)
-        if isinstance(proc, MoveAction):
-            return self.player_action(game)
-        if isinstance(proc, BlockAction):
-            return self.player_action(game)
-        if isinstance(proc, PassAction):
-            return self.player_action(game)
-        if isinstance(proc, HandoffAction):
-            return self.player_action(game)
-        if isinstance(proc, BlitzAction):
-            return self.player_action(game)
-        if isinstance(proc, FoulAction):
-            return self.player_action(game)
-        if isinstance(proc, ThrowBombAction):
-            return self.player_action(game)
-        if isinstance(proc, Block):
+                action = self.use_pro(game)
+            else:
+                action = self.reroll(game)
+        elif isinstance(proc, PlaceBall):
+            action = self.place_ball(game)
+        elif isinstance(proc, HighKick):
+            action = self.high_kick(game)
+        elif isinstance(proc, Touchback):
+            action = self.touchback(game)
+        elif isinstance(proc, Turn) and proc.quick_snap:
+            action = self.quick_snap(game)
+        elif isinstance(proc, Turn) and proc.blitz:
+            action = self.blitz(game)
+        elif isinstance(proc, Turn):
+            action = self.turn(game)
+        elif isinstance(proc, MoveAction):
+            action = self.player_action(game)
+        elif isinstance(proc, MoveAction):
+            action = self.player_action(game)
+        elif isinstance(proc, BlockAction):
+            action = self.player_action(game)
+        elif isinstance(proc, PassAction):
+            action = self.player_action(game)
+        elif isinstance(proc, HandoffAction):
+            action = self.player_action(game)
+        elif isinstance(proc, BlitzAction):
+            action = self.player_action(game)
+        elif isinstance(proc, FoulAction):
+            action = self.player_action(game)
+        elif isinstance(proc, ThrowBombAction):
+            action = self.player_action(game)
+        elif isinstance(proc, Block):
             if proc.waiting_juggernaut:
-                return self.use_juggernaut(game)
-            if proc.waiting_wrestle_attacker or proc.waiting_wrestle_defender:
-                return self.use_wrestle(game)
-            return self.block(game)
-        if isinstance(proc, Push):
+                action = self.use_juggernaut(game)
+            elif proc.waiting_wrestle_attacker or proc.waiting_wrestle_defender:
+                action = self.use_wrestle(game)
+            else:
+                action = self.block(game)
+        elif isinstance(proc, Push):
             if proc.waiting_stand_firm:
-                return self.use_stand_firm(game)
-            return self.push(game)
-        if isinstance(proc, FollowUp):
-            return self.follow_up(game)
-        if isinstance(proc, Apothecary):
-            return self.apothecary(game)
-        if isinstance(proc, Interception):
-            return self.interception(game)
-        if isinstance(proc, BloodLustBlockOrMove):
-            return self.blood_lust_block_or_move(game)
-        if isinstance(proc, EatThrall):
-            return self.eat_thrall(game)
+                action = self.use_stand_firm(game)
+            else:
+                action = self.push(game)
+        elif isinstance(proc, FollowUp):
+            action = self.follow_up(game)
+        elif isinstance(proc, Apothecary):
+            action = self.apothecary(game)
+        elif isinstance(proc, Interception):
+            action = self.interception(game)
+        elif isinstance(proc, BloodLustBlockOrMove):
+            action = self.blood_lust_block_or_move(game)
+        elif isinstance(proc, EatThrall):
+            action = self.eat_thrall(game)
+        else:
+            raise Exception("Unknown procedure")
 
-        raise Exception("Unknown procedure")
+        if action is None:
+            assert action is not None
+
+        # handle illegal action. if handle_illegal_action() returns a new legal action, return that.
+        if not game._is_action_allowed(action):
+            new_action = self.handle_illegal_action(game, action)
+            assert isinstance(new_action, Action)
+            assert game._is_action_allowed(new_action)
+            return new_action
+
+        return action
 
     def use_pro(self, game):
         raise NotImplementedError("This method must be overridden by non-human subclasses")
@@ -319,3 +239,41 @@ class MyProcBot(Agent):
 
     def eat_thrall(self, game):
         raise NotImplementedError("This method must be overridden by non-human subclasses")
+
+    def perfect_defense(self, game):
+        raise NotImplementedError("This method must be overridden by non-human subclasses")
+
+    def handle_illegal_action(self, game: Game, action: Action) -> Optional[Action]:
+        """
+        :param game: current game object
+        :param action: action that was illegal
+        :return: this particular implementation does not return, it raises an error with some
+        helpful debug information. But if you override it in a subclass you may return a safe action
+        e.g. pick a random action for the list of available action or used game._forced_action()
+        """
+
+        error_message = f"{action} is not allowed. "
+        allowed_action_types = {action_choice.action_type for action_choice in game.get_available_actions()}
+        if action.action_type not in allowed_action_types:
+            allowed_action_types_names = ", ".join(action_type.name for action_type in allowed_action_types)
+            error_message += f"Allowed action types are: {allowed_action_types_names}"
+            set_trace()
+            raise InvalidActionError(error_message)
+
+        # Find the relevant action choice
+        target_action_choice: Optional[ActionChoice] = None
+        for action_choice in game.get_available_actions():
+            if action_choice.action_type == action.action_type:
+                target_action_choice = action_choice
+                break
+
+        if len(target_action_choice.positions) > 0:
+            allowed_positions = ', '.join(map(str, target_action_choice.positions))
+            if action.position is None and None not in target_action_choice.positions:
+                error_message += f"position=None not allowed! Available positions are {allowed_positions}"
+            elif action.position not in target_action_choice.positions:
+                error_message += f"wrong position. Available positions are {allowed_positions}"
+        else:
+            error_message += "Other error, no details, sorry"
+
+        raise InvalidActionError(error_message)
