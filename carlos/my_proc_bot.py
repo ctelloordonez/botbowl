@@ -5,11 +5,11 @@ Year: 2018
 ==========================
 This module contains an example bot that takes random actions.
 """
-import botbowl
 from botbowl.core.model import Agent, Action
 from botbowl.core.game import Game, InvalidActionError
 from botbowl.core.procedure import *
-from botbowl.ai.env import BotBowlEnv
+
+from botbowl.ai.env import BotBowlEnv, EnvConf
 import torch
 import uuid
 from carlos.utils import get_data_path
@@ -21,13 +21,11 @@ class Pair():
         self.action = action
 
     def dump(self):
-        directory = get_data_path('pairs')
-        # directory = get_data_path('tensor_dataset_action_mask')
+        directory = get_data_path('new_pairs')
         if not os.path.exists(directory):
             os.mkdir(directory)
         filename = os.path.join(directory, f"{uuid.uuid4().hex}.pt")
         my_json = self.to_json()
-        # json.dump(my_json, open(filename, "w"))
         torch.save(my_json, filename)
 
     def to_json(self):
@@ -41,34 +39,33 @@ class MyProcBot(Agent):
     def __init__(self, name):
         super().__init__(name)
         self.pairs = []
-        self.env = BotBowlEnv()
-        self.env_conf = self.env.env_conf
         self.rnd = np.random.RandomState(None)
     
     def act(self, game):
         action = self.act2(game)
         action_idx = -1
-        self.env.game = game
+        env_conf = EnvConf(size=11, pathfinding=True)
+        env = BotBowlEnv(env_conf=env_conf)
+        env.reset()
+        env.game = game
         if action is not None and game._is_action_allowed(action):
             # action_idx = self.get_action_idx(action)
             try:
-                action_idx = self.env._compute_action_idx(action)
+                action_idx = env._compute_action_idx(action)
             except AttributeError:
                 action_idx = -1
         if action_idx != -1:
             action_array = np.array([action_idx])
-            
-            spatial_obs, non_spatial_obs, action_mask = self.env.get_state()
+            spatial_obs, non_spatial_obs, action_mask = env.get_state()
             spatial_obs = torch.from_numpy(np.stack(spatial_obs)).float()
             non_spatial_obs = torch.from_numpy(np.stack(non_spatial_obs)).float()
             obs = {
                 'spatial_obs': spatial_obs,
-                'non_spatial_obs': non_spatial_obs
+                'non_spatial_obs': non_spatial_obs,
+                'action_mask': action_mask
             }
             pair = Pair(obs=obs, action=torch.from_numpy(np.stack(action_array)).float())
             self.pairs.append(pair)
-            # print("done")
-            # pair.dump()
 
         return action
 
@@ -257,7 +254,6 @@ class MyProcBot(Agent):
         if action.action_type not in allowed_action_types:
             allowed_action_types_names = ", ".join(action_type.name for action_type in allowed_action_types)
             error_message += f"Allowed action types are: {allowed_action_types_names}"
-            set_trace()
             raise InvalidActionError(error_message)
 
         # Find the relevant action choice

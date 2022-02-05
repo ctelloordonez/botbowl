@@ -2,11 +2,12 @@ from fileinput import filename
 import os
 from tarfile import TarInfo
 from tkinter.constants import S
-from botbowl.core.model import Action
+from botbowl.core import game
+from botbowl.core.model import Action, ActionType
 import torch
 import numpy as np
-# from agents.carlos_agent import CNNPolicy
-from botbowl.ai.env import BotBowlEnv
+from agents.carlos_agent import CNNPolicy
+from botbowl.ai.env import BotBowlEnv, EnvConf
 import gym
 import torch.optim as optim
 import torch.nn as nn
@@ -14,6 +15,7 @@ import torch
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import time
+from botbowl.core.procedure import Procedure, Setup
 import carlos
 
 def get_data_path(rel_path):
@@ -22,7 +24,7 @@ def get_data_path(rel_path):
     return os.path.abspath(os.path.realpath(filename))
  
 def create_dataset():
-    pairs_directory = get_data_path('pairs')
+    pairs_directory = get_data_path('new_pairs')
     if not os.path.exists(pairs_directory):
         print(f"{pairs_directory} doesn't exist")
         return
@@ -49,7 +51,7 @@ def create_dataset():
     dataset_directory = get_data_path("dataset")
     if not os.path.exists(dataset_directory):
         os.mkdir(dataset_directory)
-    filename = os.path.join(dataset_directory, f"dataset.pt")
+    filename = os.path.join(dataset_directory, f"new_dataset.pt")
     torch.save(dataset, filename)
 
 
@@ -148,7 +150,7 @@ def load_dataset():
     if not os.path.exists(directory):
         return
    
-    filename = os.path.join(directory, f"dataset.pt")
+    filename = os.path.join(directory, f"new_dataset.pt")
     dataset = torch.load(filename)
     # dataset['X_spatial'] = dataset['X_spatial'][0:400]
     # dataset['X_non_spatial'] = dataset['X_non_spatial'][0:400]
@@ -162,10 +164,11 @@ def make_trainset(dataset):
     print('Making trainset')
     # print(len(dataset['X_spatial']))
     spatial_obs = torch.stack(dataset['X_spatial'][0:split])
-    # print(spatial_obs.size())
+    print(spatial_obs.size())
     spatial_obs = torch.reshape(spatial_obs, (split, 44, 17, 28)) # TODO: fix magic number
     non_spatial_obs = torch.stack(dataset['X_non_spatial'][0:split])
-    non_spatial_obs = torch.reshape(non_spatial_obs, (split, 1, 116))
+    # print(non_spatial_obs.shape)
+    non_spatial_obs = torch.reshape(non_spatial_obs, (split, 1, 115))
     # action_masks = torch.stack(dataset['action_masks'][0:split])
     # action_masks = torch.reshape(action_masks, (split, 8117))
     # print(action_masks.shape)
@@ -183,7 +186,7 @@ def make_testset(dataset):
     spatial_obs = torch.stack(dataset['X_spatial'][split:-1])
     spatial_obs = torch.reshape(spatial_obs, (len(spatial_obs), 44, 17, 28)) # TODO: Fix magic number
     non_spatial_obs = torch.stack(dataset['X_non_spatial'][split:-1])
-    non_spatial_obs = torch.reshape(non_spatial_obs, (len(non_spatial_obs), 1, 116))
+    non_spatial_obs = torch.reshape(non_spatial_obs, (len(non_spatial_obs), 1, 115))
     # action_masks = torch.stack(dataset['action_masks'][split:-1])
     # action_masks = torch.reshape(action_masks, (len(action_masks), 8117))
     actions = torch.stack(dataset['Y'][split:-1])
@@ -238,7 +241,7 @@ def train(epoch, trainloader, model, device, optimizer, loss_function):
 
     print('Train Loss: %.3f | Accuracy: %.3f'%(train_loss,accu))
  
-    model_dir = get_data_path('models')
+    model_dir = get_data_path('new_models')
     if not os.path.exists(model_dir):
         os.mkdir(model_dir)
     PATH = os.path.join(model_dir, 'epoch-{}.pth'.format(epoch))
@@ -296,8 +299,6 @@ def test(epoch, testloader, model, device, optimizer, loss_function):
   print('Test Loss: %.3f | Accuracy: %.3f'%(test_loss,accu))
   return test_loss, accu
 
- 
- 
 split = 300000
 batch_size = 4
  
@@ -325,7 +326,8 @@ def main():
                                                 shuffle=False, num_workers=2)
    
  
-    env = make_env()
+    env_conf = EnvConf(size=11, pathfinding=True)
+    env = BotBowlEnv(env_conf=env_conf)
     env.reset()
     spat_obs, non_spat_obs, action_mask = env.get_state()
     spatial_obs_space = spat_obs.shape
@@ -422,8 +424,8 @@ def testcsv():
 if __name__ == "__main__":
     # create_dataset()
     # actions_stats()
-    # main()
-    testcsv()
+    main()
+    # testcsv()
  
         # running_loss = 0.0
         # for i, data in enumerate(trainloader, 0):
