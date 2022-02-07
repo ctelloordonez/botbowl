@@ -1,6 +1,5 @@
-from ctypes import c_int
 import os
-import gym
+from numpy import size
 from botbowl import BotBowlEnv
 from torch.autograd import Variable
 import botbowl
@@ -50,22 +49,16 @@ class ResidualBlock(nn.Module):
     def __init__(self, in_channels=128, out_channels=128):
         super(ResidualBlock, self).__init__()
         self.conv0 = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
-        # self.bn0 = nn.BatchNorm2d(out_channels)
         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
-        # self.bn1 = nn.BatchNorm2d(out_channels)
         self.conv2 = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
-        # self.bn2 = nn.BatchNorm2d(out_channels)
  
     def forward(self, x):
         identity = x
         x = self.conv0(x)
-        # x = self.bn0(x)
         x = F.leaky_relu(x)
         x = self.conv1(x)
-        # x = self.bn1(x)
         x = F.leaky_relu(x)
         x = self.conv2(x)
-        # x = self.bn2(x)
         x = F.leaky_relu(x)
  
         x += identity
@@ -99,13 +92,9 @@ class CNNPolicy(nn.Module):
  
         # Spatial input stream
         self.conv_init = nn.Conv2d(in_channels=spatial_shape[0], out_channels=kernels[0], kernel_size=3, stride=1, padding=1)
-        # self.bn0 = BatchNorm2d(kernels[0])
         self.r0 = ResidualBlock()
-        # self.bn1 = BatchNorm2d(kernels[0])
         self.r1 = ResidualBlock()
-        # self.bn2 = BatchNorm2d(kernels[0])
         self.r2 = ResidualBlock()
-        # self.bn3 = BatchNorm2d(kernels[0])
         self.r3 = ResidualBlock()
  
         self.ac0 = AttentionConvolution(spatial_shape[0] + kernels[0], kernels[1])
@@ -168,20 +157,16 @@ class CNNPolicy(nn.Module):
         """
         # Spatial input through residual blocks
         if deploy: spatial_input = torch.reshape(spatial_input, (1, 44, 17, 28))
-        if deploy: non_spatial_input = torch.reshape(non_spatial_input, (1, 116))
+        if deploy: non_spatial_input = torch.reshape(non_spatial_input, (1, 115))
         x1 = self.conv_init(spatial_input)
         x1 = F.leaky_relu(x1)
         if debug: print(x1.size())
-        # x1 = self.bn0(x1)
         x1 = self.r0(x1)
         if debug: print(x1.size())
-        # x1 = self.bn1(x1)
         x1 = self.r1(x1)
         if debug: print(x1.size())
-        # x1 = self.bn2(x1)
         x1 = self.r2(x1)
         if debug: print(x1.size())
-        # x1 = self.bn3(x1)
         x1 = self.r3(x1)
         if debug: print(x1.size())
  
@@ -212,7 +197,6 @@ class CNNPolicy(nn.Module):
         # Fully-connected layers
         x3 = self.linear_fc(concatenated)
         x3 = F.relu(x3)
-        # x3 = self.dropout1(x3)
         if debug: print(x3.size())
  
         # Flatten & concatenate linear stream
@@ -253,16 +237,11 @@ class CNNPolicy(nn.Module):
         concatenated = torch.cat((flatten_x1, flatten_x5), dim=1)
         actor = self.actor(concatenated)
  
-        # return value, policy
         return value, actor
  
     def act(self, spatial_inputs, non_spatial_input, action_mask):
         values, action_probs = self.get_action_probs(spatial_inputs, non_spatial_input, action_mask=action_mask)
         actions = action_probs.multinomial(1)
-        _action_probs = action_probs.cpu().detach().numpy()
-        _actions = actions.cpu().detach().numpy()
-        for i, action_prob in enumerate(action_probs[0]):
-            print(f'{i}: {action_prob}')
         return values, actions
  
     def evaluate_actions(self, spatial_inputs, non_spatial_input, actions, actions_mask):
@@ -280,12 +259,9 @@ class CNNPolicy(nn.Module):
         values, actions = self(spatial_input, non_spatial_input)
         # Masking step: Inspired by: http://juditacs.github.io/2018/12/27/masked-attention.html
         if action_mask is not None:
-            if deploy: action_mask = torch.reshape(action_mask, (1, 8117))
+            if deploy: action_mask = torch.reshape(action_mask, (1, 8116))
             actions[~action_mask] = float('-inf')
         action_probs = F.softmax(actions, dim=1)
-        _acton_mask = action_mask.cpu().detach().numpy()
-        _actions = actions.cpu().detach().numpy()
-        _action_probs = action_probs.cpu().detach().numpy()
         return values, action_probs
  
     def get_action_log_probs(self, spatial_input, non_spatial_input, action_mask=None):
@@ -302,21 +278,20 @@ class CopiedAgent(Agent):
  
     def __init__(self, name, 
                  env_conf: EnvConf,
-                 filename=model_filename, 
-                 exclude_pathfinding_moves=True):
+                 filename=model_filename):
         super().__init__(name)
         self.my_team = None
         self.is_home = True
         self.action_queue = []
-
+        env_conf = EnvConf(size=11, pathfinding=True)
         self.env = BotBowlEnv(env_conf)
         self.env.reset()
-        self.exclude_pathfinding_moves = exclude_pathfinding_moves
 
         spat_obs, non_spat_obs, action_mask = self.env.get_state()
         spatial_obs_space = spat_obs.shape
         non_spatial_obs_space = non_spat_obs.shape[0]
         action_space = len(action_mask)
+        
         # MODEL
         self.policy = CNNPolicy(spatial_obs_space, non_spatial_obs_space, 
                                  hidden_nodes=num_hidden_nodes, 
@@ -330,46 +305,22 @@ class CopiedAgent(Agent):
         self.device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         if debug: print('Device ', self.device)
         self.policy.to(self.device)
-        # self.end_setup = False
  
     def new_game(self, game, team):
         self.my_team = team
         self.opp_team = game.get_opp_team(team)
         self.is_home = self.my_team == game.state.home_team
- 
-    # def _flip(self, board):
-    #     flipped = {}
-    #     for name, layer in board.items():
-    #         flipped[name] = np.flip(layer, 1)
-    #     return flipped
 
     def act(self, game):
         if len(self.action_queue) > 0:
             return self.action_queue.pop(0)
-        # if self.end_setup:
-        #     self.end_setup = False
-        #     return botbowl.Action(ActionType.END_SETUP)
  
         self.env.game = game
- 
-        # # Get observation
-        # observation = self.env._observation(game)
- 
-        # obs = [observation]
-        # spatial_obs, non_spatial_obs = self._update_obs(obs)
- 
-        # action_masks = self._compute_action_masks(obs)
-        # action_masks = np.array(action_masks)
-        # action_masks = torch.tensor(action_masks, dtype=torch.bool)
-        
-        # spatial_obs, non_spatial_obs, action_mask = tuple(map(torch.from_numpy, self.env.get_state()))
         spatial_obs, non_spatial_obs, action_mask = self.env.get_state()
         spatial_obs = torch.from_numpy(np.stack(spatial_obs)).float().to(self.device)
         non_spatial_obs = torch.from_numpy(np.stack(non_spatial_obs)).float().to(self.device)
         action_mask = np.array(action_mask)
         action_mask = torch.tensor(action_mask, dtype=torch.bool).to(self.device)
-        print(action_mask)
-
 
         values, actions = self.policy.act(
             Variable(spatial_obs),
@@ -381,12 +332,6 @@ class CopiedAgent(Agent):
         
         value = values[0]
         action_objects = self.env._compute_action(action_idx.cpu().numpy()[0], flip=False)
-        # position = Square(x, y) if action_type in NewBotBowlEnv.positional_action_types else None
-        # action = botbowl.Action(action_type, position=position, player=None)
- 
-        # # Let's just end the setup right after picking a formation
-        # if action.action_type.name.lower().startswith('setup'):
-        #     self.end_setup = True
  
         # Return action to the framework
         self.action_queue = action_objects
@@ -407,104 +352,20 @@ class CopiedAgent(Agent):
             print("I ({}) lost".format(self.name))
             print(self.my_team.state.score, "-", self.opp_team.state.score)
 
- 
-    # def _compute_action_masks(self, observations):
-    #     masks = []
-    #     m = False
-    #     for ob in observations:
-    #         mask = np.zeros(self.action_space)
-    #         i = 0
-    #         for action_type in self.non_spatial_action_types:
-    #             mask[i] = ob['available-action-types'][action_type.name]
-    #             i += 1
-    #         for action_type in self.spatial_action_types:
-    #             if ob['available-action-types'][action_type.name] == 0:
-    #                 mask[i:i+self.board_squares] = 0
-    #             elif ob['available-action-types'][action_type.name] == 1:
-    #                 position_mask = ob['board'][f"{action_type.name.replace('_', ' ').lower()} positions"]
-    #                 position_mask_flatten = np.reshape(position_mask, (1, self.board_squares))
-    #                 for j in range(self.board_squares):
-    #                     mask[i + j] = position_mask_flatten[0][j]
-    #             i += self.board_squares
-    #         assert 1 in mask
-    #         if m:
-    #             print(mask)
-    #         masks.append(mask)
-    #     return masks
- 
-    # def _compute_action(self, action_idx):
-    #     if action_idx < len(self.non_spatial_action_types):
-    #         return self.non_spatial_action_types[action_idx], 0, 0
-    #     spatial_idx = action_idx - self.num_non_spatial_action_types
-    #     spatial_pos_idx = spatial_idx % self.board_squares
-    #     spatial_y = int(spatial_pos_idx / self.board_dim[1])
-    #     spatial_x = int(spatial_pos_idx % self.board_dim[1])
-    #     spatial_action_type_idx = int(spatial_idx / self.board_squares)
-    #     spatial_action_type = self.spatial_action_types[spatial_action_type_idx]
-    #     return spatial_action_type, spatial_x, spatial_y
- 
-    # def _update_obs(self, observations):
-    #     """
-    #     Takes the observation returned by the environment and transforms it to an numpy array that contains all of
-    #     the feature layers and non-spatial info.
-    #     """
-    #     spatial_obs = []
-    #     non_spatial_obs = []
- 
-    #     for obs in observations:
-    #         spatial_ob = np.stack(obs['board'].values())
- 
-    #         state = list(obs['state'].values())
-    #         procedures = list(obs['procedures'].values())
-    #         actions = list(obs['available-action-types'].values())
- 
-    #         non_spatial_ob = np.stack(state+procedures+actions)
- 
-    #         # feature_layers = np.expand_dims(feature_layers, axis=0)
-    #         non_spatial_ob = np.expand_dims(non_spatial_ob, axis=0)
- 
-    #         spatial_obs.append(spatial_ob)
-    #         non_spatial_obs.append(non_spatial_ob)
- 
-    #     return torch.from_numpy(np.stack(spatial_obs)).float(), torch.from_numpy(np.stack(non_spatial_obs)).float()
- 
-    def make_env(self, env_name):
-        env = gym.make(env_name)
-        return env
- 
- 
-def load_pair():
-    directory = get_data_path('tensor_dataset')
-    if not os.path.exists(directory):
-        os.mkdir(directory)
- 
-    files = os.listdir(directory)
-    file = files[0]
-    print(file)
- 
-    filename = os.path.join(directory, 'dataset.pt')
-    dataset = torch.load(filename)
-    pair = dataset['X'][0]
-    return pair
-
 
 def _make_my_copied_bot(name):
     return CopiedAgent(name=name,
-                    env_conf=EnvConf(),
-                    filename="carlos/data/models/epoch-21.pth",
-                    exclude_pathfinding_moves=True)
+                    env_conf=EnvConf(size=11, pathfinding=True),
+                    filename="carlos/data/new_models/epoch-20.pth")
 
 def _make_my_copied_a2c(name):
     return CopiedAgent(name=name,
-                    env_conf=EnvConf(),
-                    filename="models/botbowl-11/db11c4c2-8206-11ec-8e41-ec63d79c77d6.nn",
-                    exclude_pathfinding_moves=True)
-
-
-# Register the bot to the framework
+                    env_conf=EnvConf(size=11, pathfinding=True),
+                    filename="models/botbowl-11/db11c4c2-8206-11ec-8e41-ec63d79c77d6.nn")
 
 
 if __name__ == "__main__":
+    # Register the bot to the framework
     botbowl.register_bot('my-copied-a2c', _make_my_copied_a2c) 
     botbowl.register_bot('my-copied-bot', _make_my_copied_bot) 
     # state_dic =torch.load(f"ffai/data/models/{model_name}.pth")
@@ -513,16 +374,12 @@ if __name__ == "__main__":
     config = botbowl.load_config("bot-bowl-iii")
     config.competition_mode = False
     config.pathfinding_enabled = True
-    ruleset = botbowl.load_rule_set(config.ruleset)
+    ruleset = botbowl.load_rule_set(config.ruleset, all_rules=False)
     arena = botbowl.load_arena(config.arena)
     home = botbowl.load_team_by_filename("human", ruleset)
     away = botbowl.load_team_by_filename("human", ruleset)
     config.debug_mode = False
     
-    # for e in range(29, 30):
-    # model_name = f"epoch-{e}"
-    # print(model_name)
-    # model_filename = f"carlos/data/models/{model_name}.pth"
     # Play 100 games
     game_times = []
     wins = 0
