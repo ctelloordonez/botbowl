@@ -1,3 +1,10 @@
+# Articles:
+- [Blood Bowl: A New Board Game Challenge and Competition for AI](https://njustesen.github.io/njustesen/publications/justesen2019blood.pdf): Competition description.
+- [MimicBot: Combining Imitation and Reinforcement Learning to win in Bot Bowl](https://arxiv.org/abs/2108.09478): Winner bot of 2021's competition
+- [Nested Monte-Carlo Tree Search for Online Planning in Large MDPs](https://dke.maastrichtuniversity.nl/m.winands/documents/ecai2012.pdf): MCTS enchancement with 'action-by-action' concept.
+- [Mastering the game of Go with deep neural networks and tree search](https://storage.googleapis.com/deepmind-media/alphago/AlphaGoNaturePaper.pdf)
+
+
 # botbowl
 botbowl is a python package that includes a framework for playing and developing bots for Blood Bowl. Our aim is to develop a bot that can beat the best humans at the game. 
 
