@@ -17,11 +17,13 @@ from carlos.utils import load_dataset, make_trainset, get_data_path
 from a2c_env import A2C_Reward, a2c_scripted_actions
 from botbowl.ai.layers import *
 
+import csv
+
 # Environment
 env_size = 11
 pathfinding_enabled = True
 env_name = f"botbowl-{env_size}"
-env_conf = EnvConf(size=env_size)
+env_conf = EnvConf(size=env_size, pathfinding=pathfinding_enabled)
 
 
 make_agent_from_model = partial(CopiedAgent,
@@ -38,16 +40,17 @@ def make_env():
 # Training configuration
 CRl = 40
 CBc = 40
+decay_factor = 0.99
 batch_size = 5
 num_steps = 12000000
-num_processes = 5
-steps_per_update = 40
+num_processes = 1
+steps_per_update = 5
 learning_rate = 0.000005
 gamma = 0.99
 entropy_coef = 0.01
 value_loss_coef = 0.5
 max_grad_norm = 0.05
-log_interval = 50
+log_interval = 2000
 save_interval = 10
 ppcg = False
 
@@ -239,6 +242,7 @@ class VecEnv:
 
 
 def main():
+    # CBc = 40
     torch.cuda.empty_cache()
 
     env = make_env()
@@ -259,15 +263,21 @@ def main():
                          actions=action_space)
     # model_dir = get_data_path('models')
     # PATH = os.path.join(model_dir, 'carlos/data/models/epoch-29.pth')
-    state_dict_file = torch.load('carlos/data/models/epoch-29.pth')
+
+    # ac_agent = torch.load('models/botbowl-11/87f402c6-8f07-11ec-9974-ec63d79c77d6.nn')
+    # state_dict_file = torch.load('carlos/data/no_flip_models/epoch-25.pth')
+    state_dict_file = torch.load('models/botbowl-11/ca18d2b4-9321-11ec-8781-ec63d79c77d6.pth')
     ac_agent.load_state_dict(state_dict_file['model_state_dict'])
 
     ac_agent.to(device)
 
     loss_function = nn.NLLLoss()
     # OPTIMIZER
-    optimizer = optim.RAdam(ac_agent.parameters(), lr=learning_rate, weight_decay=0.00001)
-    
+    rl_optimizer = optim.RAdam(ac_agent.parameters(), lr=learning_rate)
+    rl_optimizer.load_state_dict(state_dict_file['rl_optimizer_state_dict'])
+    bc_optimizer = optim.RAdam(ac_agent.parameters(), lr=learning_rate)
+    bc_optimizer.load_state_dict(state_dict_file['bc_optimizer_state_dict'])
+
     dataset = load_dataset()
  
     trainset = make_trainset(dataset)
@@ -295,11 +305,12 @@ def main():
     memory.action_masks[0].copy_(action_masks)
 
     # Variables for storing stats
-    all_updates = 0
-    all_episodes = 0
-    all_steps = 0
+    all_updates = 1120000
+    all_episodes = 9155
+    all_steps = 11200000
     rl_steps = 0
     bc_steps = 0
+    bc_idx = 0
     start_bc = 0
     episodes = 0
     proc_rewards = np.zeros(num_processes)
@@ -320,6 +331,17 @@ def main():
     log_mean_reward = []
     log_difficulty = []
 
+    with open('logs/botbowl-11/ca18d2b4-9321-11ec-8781-ec63d79c77d6.dat', newline='') as csvfile:
+        reader = csv.reader(csvfile)
+        for row in reader:
+            log_updates.append(int(row[0]))
+            log_episode.append(int(row[1].strip()))
+            log_steps.append(int(row[2].strip()))
+            log_win_rate.append(float(row[3].strip()))
+            log_td_rate.append(float(row[4].strip()))
+            log_td_rate_opp.append(float(row[5].strip()))
+            log_mean_reward.append(float(row[6].strip()))
+
     # self-play
     selfplay_next_save = selfplay_save_steps
     selfplay_next_swap = selfplay_swap_steps
@@ -334,12 +356,11 @@ def main():
 
     while all_steps < num_steps:
         torch.cuda.empty_cache()
-        if all_steps % log_interval: print(f'steps: {all_steps}')
-        if rl_steps < CRl:
-            count = 0
+        # if all_steps % log_interval: print(f'steps: {all_steps}')
+        # if rl_steps < CRl:
+        for crl in range(CRl):
+            ac_agent.eval()
             for step in range(steps_per_update):
-                # print(count)
-                count += 1
                 values, actions = ac_agent.act(
                     Variable(memory.spatial_obs[step]),
                     Variable(memory.non_spatial_obs[step]),
@@ -382,6 +403,9 @@ def main():
 
                 memory.insert(step, spatial_obs, non_spatial_obs, actions.data, shaped_reward, masks, action_masks)
 
+            # -- TRAINING -- #
+            ac_agent.train()
+            # bootstrap next value
             next_value = ac_agent(Variable(memory.spatial_obs[-1], requires_grad=False), Variable(memory.non_spatial_obs[-1], requires_grad=False))[0].data
 
             # Compute returns
@@ -389,13 +413,44 @@ def main():
 
             spatial = Variable(memory.spatial_obs[:-1])
             spatial = spatial.view(-1, *spatial_obs_space)
+            spatial = spatial.to(device)
             non_spatial = Variable(memory.non_spatial_obs[:-1])
             non_spatial = non_spatial.view(-1, non_spatial.shape[-1])
+            non_spatial = non_spatial.to(device)
 
             actions = Variable(torch.LongTensor(memory.actions.cpu().view(-1, 1)))
+            actions = actions.to(device)
             actions_mask = Variable(memory.action_masks[:-1])
             actions_mask = actions_mask.view(-1, action_space)
+            actions_mask = actions_mask.to(device)
 
+
+            # Evaluate the actions taken
+            action_log_probs, values, dist_entropy = ac_agent.evaluate_actions(spatial, 
+                                                                                non_spatial, 
+                                                                                actions, 
+                                                                                actions_mask)
+
+            values = values.view(steps_per_update, num_processes, 1)
+            action_log_probs = action_log_probs.view(steps_per_update, num_processes, 1)
+
+            # Compute loss
+            advantages = Variable(memory.returns[:-1]) - values
+            value_loss = advantages.pow(2).mean()
+            #value_losses.append(value_loss)
+
+            action_loss = -(Variable(advantages.data) * action_log_probs).mean()
+            #policy_losses.append(action_loss)
+
+            rl_optimizer.zero_grad()
+
+            total_loss = (value_loss * value_loss_coef + action_loss - dist_entropy * entropy_coef)
+            total_loss.backward()
+
+            # nn.utils.clip_grad_norm_(ac_agent.parameters(), max_grad_norm)
+
+            rl_optimizer.step()
+            """
             returns = Variable(memory.returns[:-1])
             # print(returns.shape)
             returns = returns.view(-1, 1)
@@ -403,6 +458,8 @@ def main():
             evaluationloader = DataLoader(TensorDataset(spatial, non_spatial, actions, actions_mask, returns), 
                                             batch_size= batch_size, shuffle=True, num_workers=0)
 
+            running_loss = 0
+            ac_agent.train()
             for j, eval_data in enumerate(evaluationloader, 0):
                 eval_spatial_obs, eval_non_spatial_obs, eval_actions, eval_actions_mask, eval_returns = eval_data
                 eval_spatial_obs = eval_spatial_obs.to(device)
@@ -432,12 +489,16 @@ def main():
                 optimizer.zero_grad()
 
                 total_loss = (value_loss * value_loss_coef + action_loss - dist_entropy * entropy_coef)
+                running_loss+=total_loss.item()
                 total_loss.backward()
 
-                nn.utils.clip_grad_norm_(ac_agent.parameters(), max_grad_norm)
+                # nn.utils.clip_grad_norm_(ac_agent.parameters(), max_grad_norm)
 
                 optimizer.step()
 
+            train_loss=running_loss/len(evaluationloader)
+            print('Total Loss: %.3f'%(train_loss))   
+            """
             memory.non_spatial_obs[0].copy_(memory.non_spatial_obs[-1])
             memory.spatial_obs[0].copy_(memory.spatial_obs[-1])
             memory.action_masks[0].copy_(memory.action_masks[-1])
@@ -472,16 +533,37 @@ def main():
         
             rl_steps += 1
         
-        elif bc_steps < CBc:
-            epoch_loss = []
-            epoch_accu = []
+        trainloader_iter = iter(trainloader)
+        # elif bc_steps < CBc:
+        for bc in range(int(CBc)):
+            ac_agent.train()
+            data = next(trainloader_iter)
 
-            running_loss = 0
-            correct = 0
-            total = 0
-            if steps_per_update + start_bc >= len(trainloader):
-                start_bc = 0
+            # get the inputs; data is a list of [inputs, labels]
+            spatial_obs, non_spatial_obs, actions = data
+            spatial_obs = spatial_obs.to(device)
+            non_spatial_obs = non_spatial_obs.to(device)
+            actions = actions.to(device)
+    
+            # zero the parameter gradients
+            bc_optimizer.zero_grad()
+    
+            # forward + backward + optimize
+            values, action_log_probs, = ac_agent.get_action_log_probs(spatial_obs, non_spatial_obs)
+            loss = loss_function(action_log_probs, actions)
+            loss.backward()
 
+            bc_optimizer.step()
+            
+            running_loss = loss.item()
+            _, predicted = action_log_probs.max(1)
+            total = actions.size(0)
+            correct = predicted.eq(actions).sum().item()
+
+            print('Train Loss: %.3f | Accuracy: %.3f'%(running_loss,100*correct/total))
+
+            all_steps += batch_size
+            """
             for i, data in enumerate(trainloader, start_bc):
                 if i >= steps_per_update + start_bc:
                     break
@@ -513,18 +595,17 @@ def main():
                 epoch_accu.append(100* predicted.eq(actions).sum().item()/actions.size(0))
 
                 all_steps += batch_size
-            
-            train_loss=running_loss/len(trainloader)
-            accu=100.*correct/total
 
-            print('Train Loss: %.3f | Accuracy: %.3f'%(train_loss,accu))   
-            start_bc += steps_per_update
-
+            """
+            bc_idx += 1 
+            if bc_idx >= len(trainloader): bc_idx = 0
             bc_steps += 1
+        del trainloader_iter
+        # CBc *= decay_factor
 
-        else:
-            rl_steps = 0
-            bc_steps = 0
+        # else:
+        #     rl_steps = 0
+        #     bc_steps = 0
 
         # Logging
         if all_updates % log_interval == 0 and len(episode_rewards) >= num_processes:
@@ -548,7 +629,7 @@ def main():
 
             log = "Upd: {}, Ep: {}, Win: {:.2f}, TD: {:.2f}, TD opp: {:.2f}, Mean reward: {:.3f}, Difficulty: {:.2f}" \
                 .format(all_updates, all_episodes, win_rate, td_rate, td_rate_opp, mean_reward, difficulty)
-            """
+            
             log_to_file = "{}, {}, {}, {}, {}, {}, {}\n" \
                 .format(all_updates, all_episodes, all_steps, win_rate, td_rate, td_rate_opp, mean_reward, difficulty)
 
@@ -557,7 +638,7 @@ def main():
             print(f"Save log to {log_path}")
             with open(log_path, "a") as myfile:
                 myfile.write(log_to_file)
-            """
+            
             print(log)
 
             episodes = 0
@@ -565,9 +646,14 @@ def main():
             policy_losses.clear()
 
             # Save model
-            model_name = f"{exp_id}.nn"
+            model_name = f"{exp_id}.pth"
             model_path = os.path.join(model_dir, model_name)
-            torch.save(ac_agent, model_path)
+            torch.save({
+                        'model_state_dict': ac_agent.cpu().state_dict(),
+                        'rl_optimizer_state_dict': rl_optimizer.state_dict(),
+                        'bc_optimizer_state_dict': bc_optimizer.state_dict()
+                        }, model_path)
+            ac_agent.to(device=device)
             
             # plot
             n = 3
@@ -581,12 +667,13 @@ def main():
             axs[0].set_xlim(left=0)
             axs[1].ticklabel_format(axis="x", style="sci", scilimits=(0,0))
             axs[1].plot(log_steps, log_td_rate, label="Learner")
+            # if selfplay:
+            # axs[1].ticklabel_format(axis="x", style="sci", scilimits=(0, 0))
+            axs[1].plot(log_steps, log_td_rate_opp, color="red", label="Opponent")
             axs[1].set_title('TD/Episode')
             axs[1].set_ylim(bottom=0.0)
             axs[1].set_xlim(left=0)
-            if selfplay:
-                axs[1].ticklabel_format(axis="x", style="sci", scilimits=(0, 0))
-                axs[1].plot(log_steps, log_td_rate_opp, color="red", label="Opponent")
+            axs[1].legend()
             axs[2].ticklabel_format(axis="x", style="sci", scilimits=(0,0))
             axs[2].plot(log_steps, log_win_rate)
             axs[2].set_title('Win rate')            

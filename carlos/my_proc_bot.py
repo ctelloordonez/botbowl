@@ -21,7 +21,7 @@ class Pair():
         self.action = action
 
     def dump(self):
-        directory = get_data_path('new_pairs')
+        directory = get_data_path('no_flip_pairs')
         if not os.path.exists(directory):
             os.mkdir(directory)
         filename = os.path.join(directory, f"{uuid.uuid4().hex}.pt")

@@ -1,3 +1,4 @@
+from fileinput import filename
 import os
 import torch
 from agents.carlos_agent import CNNPolicy
@@ -9,6 +10,7 @@ import torch
 import matplotlib.pyplot as plt
 import time
 import carlos
+import numpy as np
 
 def get_data_path(rel_path):
     root_dir = carlos.__file__.replace("__init__.py", "")
@@ -16,7 +18,7 @@ def get_data_path(rel_path):
     return os.path.abspath(os.path.realpath(filename))
  
 def create_dataset():
-    pairs_directory = get_data_path('new_pairs')
+    pairs_directory = get_data_path('no_flip_pairs')
     if not os.path.exists(pairs_directory):
         print(f"{pairs_directory} doesn't exist")
         return
@@ -43,7 +45,7 @@ def create_dataset():
     dataset_directory = get_data_path("dataset")
     if not os.path.exists(dataset_directory):
         os.mkdir(dataset_directory)
-    filename = os.path.join(dataset_directory, f"new_dataset.pt")
+    filename = os.path.join(dataset_directory, f"no_flip_dataset.pt")
     torch.save(dataset, filename)
 
 
@@ -55,69 +57,76 @@ def get_action_type(action_idx, non_spatial_action_types, spatial_action_types, 
     return spatial_action_types[spatial_action_type_idx]
 
 
-def actions_stats():
-    directory = get_data_path('dataset')
-    if not os.path.exists(directory):
-        os.mkdir(directory)
- 
-    env = gym.make('FFAI-v3')
-    spatial_obs_space = env.observation_space.spaces['board'].shape
-    board_dim = (spatial_obs_space[1], spatial_obs_space[2])
-    board_squares = spatial_obs_space[1] * spatial_obs_space[2]
- 
-    non_spatial_obs_space = env.observation_space.spaces['state'].shape[0] + env.observation_space.spaces['procedures'].shape[0] + env.observation_space.spaces['available-action-types'].shape[0]
-    non_spatial_action_types = BotBowlEnv.simple_action_types + BotBowlEnv.defensive_formation_action_types + BotBowlEnv.offensive_formation_action_types
-    num_non_spatial_action_types = len(non_spatial_action_types)
-    spatial_action_types = BotBowlEnv.positional_action_types
-    num_spatial_action_types = len(spatial_action_types)
-    num_spatial_actions = num_spatial_action_types * spatial_obs_space[1] * spatial_obs_space[2]
-    action_space = num_non_spatial_action_types + num_spatial_actions
- 
+def actions_stats(actions=None):
+    if actions == None:
+        dataset = load_dataset()
+        actions = dataset['Y']
+        del dataset
+    env_conf = EnvConf(size=11, pathfinding=True)
+    env = BotBowlEnv(env_conf=env_conf)
+
+    action_types = env_conf.action_types
     actions_dic = {}
-    for action_type in non_spatial_action_types:
-        actions_dic[action_type] = 0
-    for action_type in spatial_action_types:
-        actions_dic[action_type] = 0
-    pairs_count = 0
-
-    directory = get_data_path('dataset')
-    if not os.path.exists(directory):
-        return
+    for action_type in action_types:
+        actions_dic[action_type.name] = 0
    
-    filename = os.path.join(directory, f"dataset.pt")
-    dataset = torch.load(filename)
+    positional_action_types = env_conf.positional_action_types
+    positional_action_dic = {}
+    for postional_action in positional_action_types:
+        positional_action_dic[postional_action.name] = np.zeros((17, 28))
 
-    for a, action in enumerate(dataset['Y']):
-        if a % 200 == 0:
-            print(f"{a}/{len(dataset['Y'])}")
+    for a, action in enumerate(actions):
+        if a % 2000 == 0:
+            print(f"{a}/{len(actions)}")
         action_idx = action.type(torch.IntTensor).item()
-    # for f, file in enumerate(os.listdir(directory)):
-    #     if file == 'dataset.pt':
-    #         continue
-    #     filename = os.path.join(directory, file)
-    #     print('Loadded ', (filename))
-    #     pairs_count += 1
- 
-    #     pair = torch.load(filename)
-    #     action_idx = pair['actions'][0].type(torch.IntTensor).item()
-        # print(action_idx)
-        action_type = get_action_type(action_idx, non_spatial_action_types, spatial_action_types, board_squares)
-        # print(action_type)
+        action = env._compute_action(action_idx=action_idx, flip=False)[0]
+        action_type = action.action_type.name
+
         count =actions_dic.get(action_type)
         if count == None:
             count = 0
         actions_dic.update({action_type : count+1})
-        # print(actions_dic.get(action_type))
- 
-    print(actions_dic)
+
+        if not action.action_type in positional_action_types:
+            continue
+        x = action.position.x
+        y = action.position.y
+        positional_action_dic[action_type][y, x] += 1
+
+
     actions_percentages = {}
-    for key in actions_dic.keys():
+    for k, key in enumerate(actions_dic.keys()):
         type_count = actions_dic[key]
-        actions_percentages[key] = (type_count / len(dataset['Y'])) * 100
+        actions_percentages[key] = (type_count / len(actions)) * 100
    
     for key in actions_percentages.keys():
-        print(f'{key}: {actions_percentages.get(key)}%')
-    print(actions_percentages)
+        print("{}: {:.5f}".format(key, actions_percentages.get(key)))
+
+    import matplotlib.pyplot as plt
+
+    names = list(actions_percentages.keys())
+    values = list(actions_percentages.values())
+
+    fig, ax = plt.subplots()
+    ax.bar(names, values)
+    fig.suptitle('Dataset Train Distribution')
+
+    # Rotate the tick labels and set their alignment.
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+    plt.show()
+
+    fig, axs = plt.subplots(4, 5)
+    x = 0
+    y = 0
+    for p, positional_action in enumerate(positional_action_dic.keys()):
+        axs[x, y].imshow(positional_action_dic[positional_action])
+        axs[x, y].set_title(positional_action)
+        x += 1
+        if x >= 4:
+            x = 0
+            y += 1
+    fig.suptitle('Positional actions heatmap')
+    plt.show()
  
 def load_dataset():
     print('Loading dataset')
@@ -125,7 +134,7 @@ def load_dataset():
     if not os.path.exists(directory):
         return
    
-    filename = os.path.join(directory, f"new_dataset.pt")
+    filename = os.path.join(directory, f"no_flip_dataset.pt")
     dataset = torch.load(filename)
     # dataset['X_spatial'] = dataset['X_spatial'][0:400]
     # dataset['X_non_spatial'] = dataset['X_non_spatial'][0:400]
@@ -138,7 +147,7 @@ def load_dataset():
 def make_trainset(dataset):
     print('Making trainset')
     spatial_obs = torch.stack(dataset['X_spatial'][0:split])
-    print(spatial_obs.size())
+    # print(spatial_obs.size())
     spatial_obs = torch.reshape(spatial_obs, (split, 44, 17, 28)) # TODO: fix magic number
     non_spatial_obs = torch.stack(dataset['X_non_spatial'][0:split])
     non_spatial_obs = torch.reshape(non_spatial_obs, (split, 1, 115))
@@ -207,7 +216,7 @@ def train(epoch, trainloader, model, device, optimizer, loss_function):
 
     print('Train Loss: %.3f | Accuracy: %.3f'%(train_loss,accu))
  
-    model_dir = get_data_path('new_models')
+    model_dir = get_data_path('no_flip_models')
     if not os.path.exists(model_dir):
         os.mkdir(model_dir)
     PATH = os.path.join(model_dir, 'epoch-{}.pth'.format(epoch))
@@ -293,8 +302,7 @@ def main():
     non_spatial_obs_space = non_spat_obs.shape[0]
     action_space = len(action_mask)
 
-    # filename = "epoch-19.pth"
-    # state_dict_file = torch.load(filename)
+    # state_dict_file = torch.load("carlos/data/no_flip_models/epoch-21.pth")
     model = CNNPolicy(spatial_obs_space, non_spatial_obs_space, hidden_nodes=num_hidden_nodes, kernels=num_cnn_kernels, actions=action_space)
     # model.load_state_dict(state_dict_file['model_state_dict'])
    
@@ -313,7 +321,19 @@ def main():
    
     for epoch in range(30):
         start_time = time.time()
-        epoch_loss, epoch_accu = train(epoch, trainloader, model, device, optimizer, loss_function)
+
+        # Reload models
+        directory = get_data_path('no_flip_models')
+        filename = os.path.join(directory, f"epoch-{epoch}.pth")
+        state_dict_file = torch.load(filename)
+        model.load_state_dict(state_dict_file['model_state_dict'])
+        optimizer.load_state_dict(state_dict_file['optimizer_state_dict'])
+
+        epoch_loss = state_dict_file['loss']
+        epoch_accu = state_dict_file['accuracy']
+        print('Train Loss: %.3f | Accuracy: %.3f'%(epoch_loss, epoch_accu))
+
+        # epoch_loss, epoch_accu = train(epoch, trainloader, model, device, optimizer, loss_function)
         print('---Train takes: %s seconds ---' %(time.time() - start_time))
         train_losses.append(epoch_loss)
         train_accu.append(epoch_accu)
@@ -328,7 +348,7 @@ def main():
     del trainloader
     del testloader
  
-    plots_dir = get_data_path('plots')
+    plots_dir = get_data_path('no_flip_plots')
     if not os.path.exists(plots_dir):
         os.mkdir(plots_dir)
 
@@ -353,4 +373,6 @@ def main():
     print('Finished Training')
  
 if __name__ == "__main__":
-    main()
+    # create_dataset()
+    # main()
+    actions_stats()

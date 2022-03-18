@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-from typing import List
+from typing import List, Optional
 
 import botbowl
-from botbowl import Action, ActionType, Square, BBDieResult, Skill, Formation, ProcBot
+from botbowl import Action, ActionType, Square, BBDieResult, Skill, Formation
 import botbowl.core.pathfinding as pf
 import time
+from botbowl.core.game import Game
+
 
 from botbowl.core.pathfinding.python_pathfinding import Path  # Only used for type checker
 
@@ -679,6 +681,24 @@ class MyCopiedScriptedBot(MyProcBot):
         for pair in self.pairs:
             pair.dump()
 
+    def handle_illegal_action(self, game: Game, action: Action) -> Optional[Action]:
+        # Select a random action type
+        while True:
+            action_choice = self.rnd.choice(game.state.available_actions)
+            # Ignore PLACE_PLAYER actions
+            if action_choice.action_type != botbowl.ActionType.PLACE_PLAYER:
+                break
+
+        # Select a random position and/or player
+        position = self.rnd.choice(action_choice.positions) if len(action_choice.positions) > 0 else None
+        player = self.rnd.choice(action_choice.players) if len(action_choice.players) > 0 else None
+
+        # Make action object
+        action = botbowl.Action(action_choice.action_type, position=position, player=player)
+
+        # Return action to the framework
+        return action
+
 
 def path_to_move_actions(game: botbowl.Game, player: botbowl.Player, path: Path, do_assertions=True) -> List[Action]:
     """
@@ -767,7 +787,7 @@ if __name__ == "__main__":
         end = time.time()
         print(end - start)
 
-        directory = get_data_path('new_pairs')
+        directory = get_data_path('no_flip_pairs')
         if not os.path.exists(directory):
             os.mkdir(directory)
         

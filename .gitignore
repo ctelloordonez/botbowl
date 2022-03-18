@@ -1,8 +1,6 @@
-carlos/data/pairs/
-carlos/data/new_pairs/
-carlos/data/dataset/
 carlos/data/a2c/models/
 carlos/data/behavioural_clonning/training/
+*.pt
 # Mac
 .DS_Store
 
