@@ -66,9 +66,9 @@ class Pair():
 class ResidualBlock(nn.Module):
     def __init__(self, in_channels=128, out_channels=128):
         super(ResidualBlock, self).__init__()
-        self.conv0 = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
-        self.conv2 = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
+        self.conv0 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
  
     def forward(self, x):
         identity = x
@@ -91,7 +91,7 @@ class ResidualBlock(nn.Module):
 class AttentionConvolution(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(AttentionConvolution, self).__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1, padding=0)
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding=1)
  
     def forward(self, spatial_input, attention):
         x = self.conv(spatial_input)
@@ -136,7 +136,7 @@ class CNNPolicy(nn.Module):
         # Flatten & concatenate layer
         stream_size = kernels[0] * spatial_shape[1] * spatial_shape[2]
         stream_size += hidden_nodes
-        self.linear_fc = nn.Linear(stream_size, hidden_nodes)
+        # self.linear_fc = nn.Linear(stream_size, hidden_nodes)
  
         # Linear attention layers
         self.linear_a0 = nn.Linear(hidden_nodes, kernels[1])
@@ -150,7 +150,7 @@ class CNNPolicy(nn.Module):
         self.critic = nn.Linear(hidden_nodes, 1)
         stream_size = kernels[2] * spatial_shape[1] * spatial_shape[2]
         stream_size += 25
-        self.actor = nn.Linear(stream_size, actions)
+        # self.actor = nn.Linear(stream_size, actions)
  
         # self.reset_parameters()
  
@@ -181,7 +181,7 @@ class CNNPolicy(nn.Module):
         if not istraining: spatial_input = torch.reshape(spatial_input, (1, 44, 17, 28))
         if not istraining: non_spatial_input = torch.reshape(non_spatial_input, (1, 115))
         x1 = self.conv_init(spatial_input)
-        x1 = F.leaky_relu(x1)
+        # x1 = F.leaky_relu(x1)
         if debug: print(x1.size())
         x1 = self.r0(x1)
         if debug: print(x1.size())
@@ -216,10 +216,11 @@ class CNNPolicy(nn.Module):
         concatenated = torch.cat((flatten_x1, flatten_x2), dim=1)
         if debug: print(concatenated.size())
  
+        x3 = concatenated
         # Fully-connected layers
-        x3 = self.linear_fc(concatenated)
-        x3 = F.relu(x3)
-        if debug: print(x3.size())
+        # x3 = self.linear_fc(concatenated)
+        # x3 = F.relu(x3)
+        # if debug: print(x3.size())
  
         # Flatten & concatenate linear stream
         x2 = self.linear_h4(x3)    # h5
@@ -257,7 +258,8 @@ class CNNPolicy(nn.Module):
         flatten_x5 = x5.flatten(start_dim=1)
         if debug: print(flatten_x1.size(), flatten_x5.size())
         concatenated = torch.cat((flatten_x1, flatten_x5), dim=1)
-        actor = self.actor(concatenated)
+        # actor = self.actor(concatenated)
+        actor = concatenated
  
         return value, actor
  
